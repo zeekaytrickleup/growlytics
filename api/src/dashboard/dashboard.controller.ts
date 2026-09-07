@@ -10,4 +10,9 @@ export class DashboardController {
   getOverview(@Workspace() workspaceId: string) {
     return this.dashboard.getOverview(workspaceId);
   }
+
+  @Get('products')
+  getProducts(@Workspace() workspaceId: string) {
+    return this.dashboard.getProducts(workspaceId);
+  }
 }

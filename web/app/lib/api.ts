@@ -42,6 +42,9 @@ export const fetchMe = () => getJson<Me>("/me");
 
 export const fetchOverview = () => getJson<Overview>("/dashboard/overview");
 
+export const fetchProducts = () =>
+  getJson<{ source: string; products: OverviewProduct[] }>("/dashboard/products").then((r) => r?.products ?? null);
+
 export type AIAnswer = {
   analysis: string;
   reason: string;

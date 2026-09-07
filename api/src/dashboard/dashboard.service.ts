@@ -96,6 +96,33 @@ export class DashboardService {
     };
   }
 
+  /** All products for a workspace (for the Products + Inventory tabs). */
+  async getProducts(workspaceId: string = WORKSPACE_ID) {
+    try {
+      const products = await this.prisma.product.findMany({
+        where: { workspaceId },
+        orderBy: { revenue: 'desc' },
+      });
+      if (products.length) {
+        return {
+          source: 'live',
+          products: products.map((p) => ({
+            name: p.name,
+            rev: `$${(p.revenue / 1000).toFixed(1)}k`,
+            revenue: p.revenue,
+            orders: p.orders,
+            cr: p.conversionRt,
+            trend: (p.aiScore ?? 0.5) >= 0.65 ? 'up' : (p.aiScore ?? 0.5) <= 0.35 ? 'down' : 'flat',
+            stock: p.stock,
+          })),
+        };
+      }
+    } catch {
+      /* fall through to mock */
+    }
+    return { source: 'mock', products: this.getMockOverview().topProducts };
+  }
+
   private getMockOverview() {
     return {
       source: 'mock',

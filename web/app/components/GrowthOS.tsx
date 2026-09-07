@@ -14,7 +14,7 @@ import {
   Wallet, RefreshCw, Lightbulb, ArrowRight, Globe, Search as SearchIcon,
 } from "lucide-react";
 import {
-  fetchOverview, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
+  fetchOverview, fetchProducts, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
   fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace,
   type Overview, type Integration, type ReportSummary, type Me,
 } from "../lib/api";
@@ -717,7 +717,7 @@ function AIAssistant() {
 /* ---------------- Products ---------------- */
 function Products() {
   const [products, setProducts] = useState(topProducts);
-  useEffect(() => { fetchOverview().then(o => { if (o?.topProducts?.length) setProducts(o.topProducts as typeof topProducts); }); }, []);
+  useEffect(() => { fetchProducts().then(p => { if (p?.length) setProducts(p as typeof topProducts); }); }, []);
   const detail = products[0];
   return (
     <div className="content fade-up">
@@ -1101,6 +1101,56 @@ function SettingsPage() {
   );
 }
 
+/* ---------------- Inventory (live) ---------------- */
+function Inventory() {
+  const [products, setProducts] = useState<typeof topProducts>([]);
+  useEffect(() => { fetchProducts().then(p => setProducts((p as typeof topProducts) ?? [])); }, []);
+  const list = products.length ? products : topProducts;
+  const inStock = list.filter(p => p.stock > 0).length;
+  const lowStock = list.filter(p => p.stock > 0 && p.stock < 20).length;
+  const outStock = list.filter(p => p.stock === 0).length;
+  const status = (s: number) => (s === 0 ? { t: "Out of stock", k: "down" } : s < 20 ? { t: "Low — restock", k: "warn" } : { t: "OK", k: "up" });
+  const stats = [
+    { label: "Products", value: list.length, color: "var(--blue)", icon: Boxes },
+    { label: "In Stock", value: inStock, color: "var(--emerald)", icon: Flame },
+    { label: "Low Stock", value: lowStock, color: "var(--amber)", icon: AlertTriangle },
+    { label: "Out of Stock", value: outStock, color: "var(--red)", icon: Package },
+  ];
+  return (
+    <div className="content fade-up">
+      <div className="kpi-grid">
+        {stats.map((k, i) => (
+          <div key={i} className="kpi">
+            <div className="kpi-top"><div className="kpi-ico" style={{ background: `${k.color}22`, color: k.color }}><k.icon size={16} /></div></div>
+            <div className="kpi-label">{k.label}</div>
+            <div className="kpi-value mono">{k.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="card pad-lg">
+        <div className="card-head"><div><div className="card-title">Inventory Health</div><div className="card-sub">Stock levels from your connected store</div></div></div>
+        <table className="tbl">
+          <thead><tr><th>Product</th><th>Stock</th><th>Units sold</th><th>Revenue</th><th>Status</th></tr></thead>
+          <tbody>
+            {list.map(p => {
+              const st = status(p.stock);
+              return (
+                <tr key={p.name}>
+                  <td className="name">{p.name}</td>
+                  <td className="mono" style={{ color: p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock}</td>
+                  <td className="mono">{p.orders}</td>
+                  <td className="mono">{p.rev}</td>
+                  <td><Badge kind={st.k}>{st.t}</Badge></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Command bar ---------------- */
 function CommandBar({ open, setOpen, go }: { open: boolean; setOpen: (v: boolean) => void; go: (id: string) => void }) {
   const [q, setQ] = useState("");
@@ -1196,11 +1246,7 @@ export default function GrowthOS() {
         tableHead={["Flow", "Revenue", "Open", "Click", "Status"]}
         rows={[["Abandoned Cart", "$8,400", "44%", "9.1%", "Active"], ["Welcome Flow", "$6,100", "52%", "8.4%", "Active"], ["Win-back", "$3,200", "31%", "4.2%", "Active"], ["Post-Purchase", "$4,900", "48%", "7.0%", "Active"]]}
         aiNote="Your abandoned-cart flow drives $8.4k but stops after one email. Adding a second reminder at 24h with a small incentive typically lifts flow revenue 20–30%." />;
-      case "inventory": return <MetricScreen title="Inventory Health" sub="Stock levels &amp; demand"
-        kpis={[{ icon: Boxes, label: "Inventory Value", value: "$142k", delta: "3%", kind: "up", color: "var(--blue)" }, { icon: AlertTriangle, label: "Low Stock", value: "7", delta: "2", kind: "down", color: "var(--red)" }, { icon: Package, label: "Dead Stock", value: "$9.4k", delta: "5%", kind: "down", color: "var(--amber)" }, { icon: Flame, label: "Fast Movers", value: "14", delta: "3", kind: "up", color: "var(--emerald)" }]}
-        tableHead={["Product", "Stock", "Daily velocity", "Days left", "Action"]}
-        rows={[["Flux Smart Bottle", "12", "4.1/day", "3", "Restock now"], ["Nimbus Hoodie", "88", "9.2/day", "10", "Restock soon"], ["Terra Yoga Mat", "61", "2.0/day", "30", "OK"], ["Lumen Desk Lamp", "205", "5.7/day", "36", "OK"]]}
-        aiNote="Flux Smart Bottle will stock out in 3 days. Raise a PO for 400 units now; lead time is 12 days, so a stockout gap of ~9 days is otherwise unavoidable, risking ~$4.1k in lost sales." />;
+      case "inventory": return <Inventory />;
       case "forecasting": return <MetricScreen title="Revenue Forecast" sub="AI projection · next 6 months (95% interval)"
         kpis={[{ icon: TrendingUp, label: "Q4 Revenue (proj)", value: "$483k", delta: "31%", kind: "up", color: "var(--emerald)" }, { icon: ShoppingCart, label: "Orders (proj)", value: "11.4k", delta: "24%", kind: "up", color: "var(--primary-2)" }, { icon: Users, label: "New Customers", value: "4.2k", delta: "19%", kind: "up", color: "var(--purple)" }, { icon: Wallet, label: "Ad Budget (rec)", value: "$78k", delta: "12%", kind: "up", color: "var(--blue)" }]}
         chart={fcChart}
