@@ -733,7 +733,7 @@ function Products() {
                 <td className="mono">{p.rev}</td>
                 <td className="mono" style={{ color: "var(--emerald)" }}>${(parseFloat(p.rev.replace(/[$k]/g, "")) * 0.36).toFixed(1)}k</td>
                 <td className="mono">{p.cr}%</td>
-                <td><span className="mono" style={{ color: p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock}</span></td>
+                <td><span className="mono" style={{ color: p.stock > 0 && p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock < 0 ? "In stock" : p.stock}</span></td>
                 <td className="mono">${(41 + i * 3.4).toFixed(2)}</td>
                 <td>{i === 0 ? <Badge kind="up">Scale ads</Badge> : i === 2 ? <Badge kind="warn">Restock</Badge> : <Badge kind="info">Bundle</Badge>}</td>
               </tr>
@@ -1106,10 +1106,10 @@ function Inventory() {
   const [products, setProducts] = useState<typeof topProducts>([]);
   useEffect(() => { fetchProducts().then(p => setProducts((p as typeof topProducts) ?? [])); }, []);
   const list = products.length ? products : topProducts;
-  const inStock = list.filter(p => p.stock > 0).length;
+  const inStock = list.filter(p => p.stock !== 0).length;
   const lowStock = list.filter(p => p.stock > 0 && p.stock < 20).length;
   const outStock = list.filter(p => p.stock === 0).length;
-  const status = (s: number) => (s === 0 ? { t: "Out of stock", k: "down" } : s < 20 ? { t: "Low — restock", k: "warn" } : { t: "OK", k: "up" });
+  const status = (s: number) => (s < 0 ? { t: "In stock", k: "up" } : s === 0 ? { t: "Out of stock", k: "down" } : s < 20 ? { t: "Low — restock", k: "warn" } : { t: "OK", k: "up" });
   const stats = [
     { label: "Products", value: list.length, color: "var(--blue)", icon: Boxes },
     { label: "In Stock", value: inStock, color: "var(--emerald)", icon: Flame },
@@ -1137,7 +1137,7 @@ function Inventory() {
               return (
                 <tr key={p.name}>
                   <td className="name">{p.name}</td>
-                  <td className="mono" style={{ color: p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock}</td>
+                  <td className="mono" style={{ color: p.stock > 0 && p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock < 0 ? "—" : p.stock}</td>
                   <td className="mono">{p.orders}</td>
                   <td className="mono">{p.rev}</td>
                   <td><Badge kind={st.k}>{st.t}</Badge></td>

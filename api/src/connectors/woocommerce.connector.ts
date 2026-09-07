@@ -9,6 +9,8 @@ type WooProduct = {
   price: string;
   regular_price?: string;
   stock_quantity: number | null;
+  manage_stock?: boolean;
+  stock_status?: string; // instock | outofstock | onbackorder
   total_sales: number;
 };
 
@@ -110,13 +112,20 @@ export class WooCommerceConnector implements Connector {
       .map((p) => {
         const price = parseFloat(p.price) || parseFloat(p.regular_price || '') || 0;
         const sales = p.total_sales || 0;
+        // Tracked quantity when the store manages stock; else -1 = "in stock, untracked", 0 = out.
+        const stock =
+          p.manage_stock && typeof p.stock_quantity === 'number'
+            ? p.stock_quantity
+            : p.stock_status === 'outofstock'
+              ? 0
+              : -1;
         return {
           externalId: `woo-${p.id}`,
           name: p.name,
           revenue: Math.round(sales * price),
           orders: sales,
           conversionRt: 0,
-          stock: p.stock_quantity ?? 0,
+          stock,
           aiScore: Math.min(0.95, 0.3 + 0.6 * (sales / maxSales)),
         };
       })
