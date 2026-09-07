@@ -716,16 +716,18 @@ function AIAssistant() {
 
 /* ---------------- Products ---------------- */
 function Products() {
-  const detail = topProducts[0];
+  const [products, setProducts] = useState(topProducts);
+  useEffect(() => { fetchOverview().then(o => { if (o?.topProducts?.length) setProducts(o.topProducts as typeof topProducts); }); }, []);
+  const detail = products[0];
   return (
     <div className="content fade-up">
       <div className="card pad-lg">
-        <div className="card-head"><div><div className="card-title">Product Intelligence</div><div className="card-sub">312 products · AI-scored for revenue potential</div></div>
+        <div className="card-head"><div><div className="card-title">Product Intelligence</div><div className="card-sub">{products.length} products · AI-scored for revenue potential</div></div>
           <div style={{ display: "flex", gap: 8 }}><span className="chip active">All</span><span className="chip">Trending</span><span className="chip">Low stock</span></div></div>
         <table className="tbl">
           <thead><tr><th>Product</th><th>Revenue</th><th>Profit</th><th>CR</th><th>Stock</th><th>Suggested price</th><th>AI</th></tr></thead>
           <tbody>
-            {topProducts.map((p, i) => (
+            {products.map((p, i) => (
               <tr key={p.name}>
                 <td className="name">{p.name}</td>
                 <td className="mono">{p.rev}</td>
@@ -744,7 +746,7 @@ function Products() {
           <div className="card-head"><div className="card-title">{detail.name}</div><Badge kind="up">Trending</Badge></div>
           <div style={{ display: "flex", justifyContent: "space-around", padding: "6px 0 2px" }}>
             <ProgressRing value={84} label="84" sub="Health" color="var(--emerald)" />
-            <ProgressRing value={48} label="4.8%" sub="CR" color="var(--primary-2)" />
+            <ProgressRing value={Math.min(100, (detail.cr || 0) * 10)} label={`${detail.cr}%`} sub="CR" color="var(--primary-2)" />
           </div>
         </div>
         <div className="card pad-lg">
