@@ -4,8 +4,10 @@
 // change provider to "mysql" and the DATABASE_URL — the models are otherwise compatible.
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
+  provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/client"
+  // "native" for local; "rhel-openssl-3.0.x" is Vercel's serverless (AWS Lambda) runtime.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
