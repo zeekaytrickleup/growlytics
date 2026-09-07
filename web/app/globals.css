@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* The Growlytics UI ships its own design system inside GrowthOS.tsx (the .gos scope).
+   Keep global base minimal and dark so there is no flash of white. */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #08080c;
+  color: #ededf2;
+  min-height: 100%;
+}

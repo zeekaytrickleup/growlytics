@@ -1,0 +1,203 @@
+// Growlytics AI — Prisma schema v1
+// Target DB: PostgreSQL (free hosting on Neon/Supabase; see DEPLOY.md). Schema is applied with
+// `prisma db push` (no migration files needed for a fresh DB). To use MySQL locally instead,
+// change provider to "mysql" and the DATABASE_URL — the models are otherwise compatible.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & users
+// ---------------------------------------------------------------------------
+
+model Workspace {
+  id           String        @id @default(cuid())
+  name         String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  memberships  Membership[]
+  integrations Integration[]
+  metrics      MetricSnapshot[]
+  products     Product[]
+  customers    Customer[]
+  segments     Segment[]
+  insights     Insight[]
+  chatMessages ChatMessage[]
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String?
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  role        Role      @default(MEMBER)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Integrations (connected data sources)
+// ---------------------------------------------------------------------------
+
+enum Provider {
+  SHOPIFY
+  WOOCOMMERCE
+  GOOGLE_ADS
+  META_ADS
+  GA4
+  KLAVIYO
+  SEARCH_CONSOLE
+  TIKTOK_ADS
+  STRIPE
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  SYNCING
+  ERROR
+  AVAILABLE
+}
+
+model Integration {
+  id              String            @id @default(cuid())
+  provider        Provider
+  status          IntegrationStatus @default(AVAILABLE)
+  // OAuth tokens — MUST be encrypted at rest before storing (see MASTER_PLAN §3.2)
+  encryptedTokens String?           @db.Text
+  meta            Json?
+  lastSyncedAt    DateTime?
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId     String
+
+  @@unique([workspaceId, provider])
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Normalized metrics — the layer the UI and AI read from (never vendor APIs live)
+// ---------------------------------------------------------------------------
+
+model MetricSnapshot {
+  id          String    @id @default(cuid())
+  source      Provider
+  metric      String // e.g. "revenue", "orders", "roas", "sessions"
+  value       Float
+  dimension   String? // e.g. channel name, product id, segment
+  ts          DateTime // the period this value is for
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+
+  @@index([workspaceId, metric, ts])
+}
+
+model Product {
+  id           String    @id @default(cuid())
+  externalId   String
+  name         String
+  revenue      Float     @default(0)
+  orders       Int       @default(0)
+  conversionRt Float     @default(0)
+  stock        Int       @default(0)
+  aiScore      Float?
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId  String
+
+  @@unique([workspaceId, externalId])
+  @@index([workspaceId])
+}
+
+model Customer {
+  id          String    @id @default(cuid())
+  externalId  String
+  email       String?
+  ltv         Float     @default(0)
+  ordersCount Int       @default(0)
+  lastOrderAt DateTime?
+  churnRisk   Float? // 0..1
+  segment     Segment?  @relation(fields: [segmentId], references: [id])
+  segmentId   String?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+
+  @@unique([workspaceId, externalId])
+  @@index([workspaceId])
+}
+
+model Segment {
+  id          String     @id @default(cuid())
+  name        String // VIP, Loyal, Repeat, One-Time, Dormant, Churn Risk
+  color       String?
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  customers   Customer[]
+
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// AI layer — insights, recommendations, chat
+// ---------------------------------------------------------------------------
+
+enum InsightStatus {
+  NEW
+  SEEN
+  ACTIONED
+  DISMISSED
+}
+
+model Insight {
+  id          String        @id @default(cuid())
+  type        String // "revenue", "ads", "product", "inventory", "churn"
+  title       String
+  body        String        @db.Text
+  confidence  Float // 0..100
+  payload     Json? // structured { analysis, reason, actions[], impact }
+  status      InsightStatus @default(NEW)
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+
+  @@index([workspaceId, status])
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model ChatMessage {
+  id          String    @id @default(cuid())
+  role        ChatRole
+  text        String    @db.Text
+  payload     Json? // structured AI answer when role = ASSISTANT
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+
+  @@index([workspaceId, createdAt])
+}

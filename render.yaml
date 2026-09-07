@@ -1,0 +1,22 @@
+# Render Blueprint for the Growlytics API (free web service).
+# In Render: New + → Blueprint → pick this repo. It reads this file.
+# The database is external (Neon) — set DATABASE_URL in the Render dashboard.
+services:
+  - type: web
+    name: growlytics-api
+    runtime: node
+    plan: free
+    rootDir: api
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false # paste your Neon connection string in the dashboard
+      - key: WEB_ORIGIN
+        value: "*" # tighten to your Vercel URL later
+      - key: ANTHROPIC_API_KEY
+        sync: false # optional — enables live Claude answers

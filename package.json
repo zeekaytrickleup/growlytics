@@ -1,0 +1,17 @@
+{
+  "name": "growlytics-ai-system",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Growlytics AI — Your AI Co-Pilot for Smarter E-commerce Growth",
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm --prefix api run start:dev\" \"npm --prefix web run dev\"",
+    "install:all": "npm --prefix api install && npm --prefix web install",
+    "setup": "npm run install:all && npm --prefix api run db:push",
+    "seed": "npm --prefix api run db:seed",
+    "build": "npm --prefix api run build && npm --prefix web run build",
+    "test": "npm --prefix api test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

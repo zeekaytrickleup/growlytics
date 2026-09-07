@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Builds
+web/.next/
+web/out/
+api/dist/
+**/dist/
+
+# Prisma generated client
+api/node_modules/.prisma/
+
+# Logs / OS / editor
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Coverage
+coverage/
+**/coverage/
