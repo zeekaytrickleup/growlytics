@@ -3,7 +3,14 @@ import { Provider } from '@prisma/client';
 import { Connector, SyncResult, NormalizedProduct, NormalizedKpi } from './connector.interface';
 
 type WooOrder = { total: string; status: string; date_created_gmt?: string; date_created?: string };
-type WooProduct = { id: number; name: string; price: string; stock_quantity: number | null; total_sales: number };
+type WooProduct = {
+  id: number;
+  name: string;
+  price: string;
+  regular_price?: string;
+  stock_quantity: number | null;
+  total_sales: number;
+};
 
 const DAY = 86_400_000;
 
@@ -101,7 +108,7 @@ export class WooCommerceConnector implements Connector {
     const maxSales = Math.max(1, ...productsRaw.map((p) => p.total_sales || 0));
     const products: NormalizedProduct[] = productsRaw
       .map((p) => {
-        const price = parseFloat(p.price) || 0;
+        const price = parseFloat(p.price) || parseFloat(p.regular_price || '') || 0;
         const sales = p.total_sales || 0;
         return {
           externalId: `woo-${p.id}`,
