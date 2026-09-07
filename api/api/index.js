@@ -1,7 +1,6 @@
 // Vercel serverless entry for the NestJS API.
-// Vercel (Root Directory = api) treats files under api/ as functions; this catch-all handles
-// every /api/* request. It boots the *compiled* Nest app (dist/, built by `vercel-build` with
-// full decorator metadata) once per warm instance and reuses it.
+// A vercel.json rewrite sends every /api/* request here; this boots the *compiled* Nest app
+// (dist/, built by `vercel-build` with full decorator metadata) once and reuses it.
 const { NestFactory } = require('@nestjs/core');
 const { ExpressAdapter } = require('@nestjs/platform-express');
 const express = require('express');
