@@ -60,16 +60,26 @@ export class IntegrationsService {
       create: { id: workspaceId, name: 'Northwind Goods' },
     });
     await this.upsertStatus(provider, IntegrationStatus.SYNCING, undefined, workspaceId);
-    const result = await this.ingestion.ingest(provider, workspaceId);
-    await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
-    return { ...result, status: 'connected' };
+    try {
+      const result = await this.ingestion.ingest(provider, workspaceId);
+      await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
+      return { ...result, status: 'connected' };
+    } catch (err) {
+      await this.upsertStatus(provider, IntegrationStatus.ERROR, null, workspaceId);
+      return { provider, status: 'error', error: (err as Error).message };
+    }
   }
 
   async sync(rawProvider: string, workspaceId: string = WORKSPACE_ID) {
     const provider = this.parseProvider(rawProvider);
-    const result = await this.ingestion.ingest(provider, workspaceId);
-    await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
-    return { ...result, status: 'synced' };
+    try {
+      const result = await this.ingestion.ingest(provider, workspaceId);
+      await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
+      return { ...result, status: 'synced' };
+    } catch (err) {
+      await this.upsertStatus(provider, IntegrationStatus.ERROR, null, workspaceId);
+      return { provider, status: 'error', error: (err as Error).message };
+    }
   }
 
   async disconnect(rawProvider: string, workspaceId: string = WORKSPACE_ID) {

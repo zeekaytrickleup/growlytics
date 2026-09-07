@@ -3,6 +3,7 @@ import { Provider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InsightsService } from '../insights/insights.service';
 import { ShopifyConnector } from './shopify.connector';
+import { WooCommerceConnector } from './woocommerce.connector';
 import { Connector } from './connector.interface';
 
 const WORKSPACE_ID = 'demo-workspace';
@@ -21,8 +22,9 @@ export class IngestionService {
     private readonly prisma: PrismaService,
     private readonly insights: InsightsService,
     shopify: ShopifyConnector,
+    woocommerce: WooCommerceConnector,
   ) {
-    this.connectors = { [Provider.SHOPIFY]: shopify };
+    this.connectors = { [Provider.SHOPIFY]: shopify, [Provider.WOOCOMMERCE]: woocommerce };
   }
 
   supports(provider: Provider): boolean {
