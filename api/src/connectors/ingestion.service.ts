@@ -47,18 +47,13 @@ export class IngestionService {
 
     const data = await connector.sync();
 
-    // Upsert products by external id.
-    for (const p of data.products) {
-      await this.prisma.product.upsert({
-        where: { workspaceId_externalId: { workspaceId, externalId: p.externalId } },
-        update: { name: p.name, revenue: p.revenue, orders: p.orders, conversionRt: p.conversionRt, stock: p.stock, aiScore: p.aiScore },
-        create: { workspaceId, ...p },
-      });
-    }
+    // The connected store is authoritative — replace the workspace's products and its
+    // KPI/revenue metrics from any prior source (so real store data isn't mixed with the seed).
+    await this.prisma.product.deleteMany({ where: { workspaceId } });
+    await this.prisma.product.createMany({ data: data.products.map((p) => ({ ...p, workspaceId })) });
 
-    // Replace this source's metric rows (leaves other sources — e.g. GA4 traffic — intact).
     await this.prisma.metricSnapshot.deleteMany({
-      where: { workspaceId, source: provider, metric: { in: ['kpi', 'kpi_prev', 'revenue', 'revenue_prev'] } },
+      where: { workspaceId, metric: { in: ['kpi', 'kpi_prev', 'revenue', 'revenue_prev'] } },
     });
     const now = new Date();
     const kpiRows = data.kpis.flatMap((k) => [
