@@ -42,43 +42,74 @@ Always return: a short analysis, the reason (why), a confidence score (0-100) re
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly client: Anthropic | null;
+  private readonly geminiKey: string | null;
 
   constructor() {
-    const key = process.env.ANTHROPIC_API_KEY;
-    this.client = key ? new Anthropic() : null;
-    if (!this.client) {
-      this.logger.warn('ANTHROPIC_API_KEY not set — Growth Assistant will use mock answers.');
-    }
+    const anthKey = process.env.ANTHROPIC_API_KEY;
+    this.client = anthKey ? new Anthropic() : null;
+    this.geminiKey = !this.client && process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY! : null;
+    if (this.client) this.logger.log('Growth Assistant: using Claude.');
+    else if (this.geminiKey) this.logger.log('Growth Assistant: using Google Gemini (free tier).');
+    else this.logger.warn('No AI key set — Growth Assistant uses grounded mock answers.');
   }
 
   get enabled(): boolean {
-    return this.client !== null;
+    return this.client !== null || this.geminiKey !== null;
   }
 
   async answer(question: string, context: unknown): Promise<AIAnswer> {
-    if (!this.client) return this.mock(question);
     try {
-      const res = await this.client.messages.create({
-        model: 'claude-opus-4-8',
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: `Connected store data snapshot (JSON):\n${JSON.stringify(context)}\n\nQuestion: ${question}`,
-          },
-        ],
-        // Structured outputs — the response text is guaranteed to match ANSWER_SCHEMA.
-        output_config: { format: { type: 'json_schema', schema: ANSWER_SCHEMA } },
-      } as Anthropic.MessageCreateParamsNonStreaming);
-
-      const text = res.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '';
-      const parsed = JSON.parse(text) as AIAnswer;
-      return { ...parsed, source: 'llm' };
+      if (this.client) return await this.callAnthropic(question, context);
+      if (this.geminiKey) return await this.callGemini(question, context);
     } catch (err) {
       this.logger.warn(`AI call failed, falling back to mock: ${(err as Error).message}`);
-      return this.mock(question);
     }
+    return this.mock(question);
+  }
+
+  private userPrompt(question: string, context: unknown): string {
+    return `Connected store data snapshot (JSON):\n${JSON.stringify(context)}\n\nQuestion: ${question}`;
+  }
+
+  private async callAnthropic(question: string, context: unknown): Promise<AIAnswer> {
+    const res = await this.client!.messages.create({
+      model: 'claude-opus-4-8',
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: this.userPrompt(question, context) }],
+      output_config: { format: { type: 'json_schema', schema: ANSWER_SCHEMA } },
+    } as Anthropic.MessageCreateParamsNonStreaming);
+    const text = res.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '';
+    return { ...(JSON.parse(text) as AIAnswer), source: 'llm' };
+  }
+
+  // Free tier — Google Gemini (gemini-2.0-flash) with a JSON response schema.
+  private async callGemini(question: string, context: unknown): Promise<AIAnswer> {
+    const schema = {
+      type: 'OBJECT',
+      properties: {
+        analysis: { type: 'STRING' },
+        reason: { type: 'STRING' },
+        confidence: { type: 'INTEGER' },
+        actions: { type: 'ARRAY', items: { type: 'STRING' } },
+        impact: { type: 'STRING' },
+      },
+      required: ['analysis', 'reason', 'confidence', 'actions', 'impact'],
+    };
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.geminiKey}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ parts: [{ text: this.userPrompt(question, context) }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 },
+      }),
+    });
+    if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    return { ...(JSON.parse(text) as AIAnswer), source: 'llm' };
   }
 
   // Grounded canned answers (mirror the prototype) + a generic fallback for free-text questions.

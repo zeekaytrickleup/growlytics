@@ -5,6 +5,7 @@ describe('AiService (mock mode)', () => {
 
   beforeEach(() => {
     delete process.env.ANTHROPIC_API_KEY; // force mock mode — no network calls
+    delete process.env.GEMINI_API_KEY;
     svc = new AiService();
   });
 
