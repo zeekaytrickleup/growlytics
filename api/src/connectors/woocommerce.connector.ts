@@ -59,26 +59,35 @@ export class WooCommerceConnector implements Connector {
     return all;
   }
 
-  /** Compute customer segments from the store's customers (RFM-ish, mutually exclusive). */
+  /** Compute customer segments from actual orders (grouped by buyer email — captures guests too). */
   async customerSegments() {
-    const customers = (await this.fetchAll('customers', { orderby: 'registered_date', order: 'desc', role: 'all' })) as {
-      orders_count: number;
-      total_spent: string;
+    const orders = (await this.fetchAll('orders', { status: 'any', orderby: 'date', order: 'desc' })) as {
+      status: string;
+      total: string;
+      billing?: { email?: string };
     }[];
+    const paid = orders.filter((o) => ['completed', 'processing', 'on-hold'].includes(o.status));
+
+    const byEmail = new Map<string, { orders: number; spent: number }>();
+    for (const o of paid) {
+      const email = (o.billing?.email || '').trim().toLowerCase();
+      if (!email) continue;
+      const e = byEmail.get(email) || { orders: 0, spent: 0 };
+      e.orders += 1;
+      e.spent += parseFloat(o.total) || 0;
+      byEmail.set(email, e);
+    }
 
     const buckets: Record<string, { n: number; ltv: number }> = {
       VIP: { n: 0, ltv: 0 },
       Loyal: { n: 0, ltv: 0 },
       'Repeat Buyers': { n: 0, ltv: 0 },
       'One-Time': { n: 0, ltv: 0 },
-      'No Orders': { n: 0, ltv: 0 },
     };
-    for (const c of customers) {
-      const spent = parseFloat(c.total_spent) || 0;
-      const orders = c.orders_count || 0;
-      const key = spent >= 200 ? 'VIP' : orders >= 3 ? 'Loyal' : orders === 2 ? 'Repeat Buyers' : orders === 1 ? 'One-Time' : 'No Orders';
+    for (const c of byEmail.values()) {
+      const key = c.spent >= 200 ? 'VIP' : c.orders >= 3 ? 'Loyal' : c.orders === 2 ? 'Repeat Buyers' : 'One-Time';
       buckets[key].n += 1;
-      buckets[key].ltv += spent;
+      buckets[key].ltv += c.spent;
     }
 
     const meta: Record<string, { color: string; ai: string }> = {
@@ -86,7 +95,6 @@ export class WooCommerceConnector implements Connector {
       Loyal: { color: 'var(--emerald)', ai: 'Referral program' },
       'Repeat Buyers': { color: 'var(--primary-2)', ai: 'Cross-sell bundles' },
       'One-Time': { color: 'var(--blue)', ai: 'Welcome flow #2' },
-      'No Orders': { color: 'var(--mute)', ai: 'First-purchase offer' },
     };
     const fmt = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`);
     return Object.entries(buckets).map(([name, b]) => ({
