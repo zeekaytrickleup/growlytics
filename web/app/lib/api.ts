@@ -40,7 +40,8 @@ export type Me = {
 };
 export const fetchMe = () => getJson<Me>("/me");
 
-export const fetchOverview = () => getJson<Overview>("/dashboard/overview");
+export const fetchOverview = (period?: string) =>
+  getJson<Overview>(`/dashboard/overview${period ? `?period=${period}` : ""}`);
 
 export const fetchProducts = () =>
   getJson<{ source: string; products: OverviewProduct[] }>("/dashboard/products").then((r) => r?.products ?? null);

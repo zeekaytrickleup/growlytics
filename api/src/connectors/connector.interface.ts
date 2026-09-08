@@ -21,6 +21,8 @@ export interface SyncResult {
   products: NormalizedProduct[];
   kpis: NormalizedKpi[];
   revenueSeries: { d: string; rev: number; prev: number }[];
+  /** Optional daily history (date YYYY-MM-DD → revenue + order count) for period filtering. */
+  dailySeries?: { date: string; rev: number; orders: number }[];
 }
 
 /**

@@ -53,9 +53,18 @@ export class IngestionService {
     await this.prisma.product.createMany({ data: data.products.map((p) => ({ ...p, workspaceId })) });
 
     await this.prisma.metricSnapshot.deleteMany({
-      where: { workspaceId, metric: { in: ['kpi', 'kpi_prev', 'revenue', 'revenue_prev'] } },
+      where: { workspaceId, metric: { in: ['kpi', 'kpi_prev', 'revenue', 'revenue_prev', 'day_rev', 'day_ord'] } },
     });
     const now = new Date();
+
+    // Daily history (for the dashboard period filter).
+    const dailyRows = (data.dailySeries ?? []).flatMap((d) => {
+      const ts = new Date(d.date + 'T00:00:00Z');
+      return [
+        { workspaceId, source: provider, metric: 'day_rev', dimension: d.date, value: d.rev, ts },
+        { workspaceId, source: provider, metric: 'day_ord', dimension: d.date, value: d.orders, ts },
+      ];
+    });
     const kpiRows = data.kpis.flatMap((k) => [
       { workspaceId, source: provider, metric: 'kpi', dimension: k.key, value: k.cur, ts: now },
       { workspaceId, source: provider, metric: 'kpi_prev', dimension: k.key, value: k.prev, ts: now },
@@ -67,7 +76,7 @@ export class IngestionService {
         { workspaceId, source: provider, metric: 'revenue_prev', dimension: r.d, value: r.prev, ts },
       ];
     });
-    await this.prisma.metricSnapshot.createMany({ data: [...kpiRows, ...revRows] });
+    await this.prisma.metricSnapshot.createMany({ data: [...kpiRows, ...revRows, ...dailyRows] });
 
     // Fresh data → fresh insights.
     const generated = await this.insights.generate(workspaceId).catch(() => ({ generated: 0 }));

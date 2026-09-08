@@ -421,13 +421,14 @@ const FALLBACK_INSIGHTS = [
 function Dashboard({ go }: { go: (id: string) => void }) {
   const [data, setData] = useState<Overview | null>(null);
   const [live, setLive] = useState(false);
+  const [period, setPeriod] = useState("30d");
   useEffect(() => {
     let mounted = true;
-    fetchOverview().then(o => {
+    fetchOverview(period).then(o => {
       if (mounted && o) { setData(o); setLive(true); }
     });
     return () => { mounted = false; };
-  }, []);
+  }, [period]);
 
   const kpiData = data?.kpis ?? FALLBACK_KPIS;
   const insightData = data?.insights ?? FALLBACK_INSIGHTS;
@@ -471,8 +472,8 @@ function Dashboard({ go }: { go: (id: string) => void }) {
       <div className="grid" style={{ gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr)" }}>
         <div className="card pad-lg">
           <div className="card-head">
-            <div><div className="card-title">Revenue</div><div className="card-sub">This week vs. last week</div></div>
-            <div style={{ display: "flex", gap: 8 }}>{["7D", "30D", "90D"].map((t, i) => <span key={t} className={`chip ${i === 0 ? "active" : ""}`}>{t}</span>)}</div>
+            <div><div className="card-title">Revenue</div><div className="card-sub">{period === "7d" ? "Last 7 days" : period === "30d" ? "Last 30 days" : "Last 90 days"} vs. previous period</div></div>
+            <div style={{ display: "flex", gap: 8 }}>{([["7D", "7d"], ["30D", "30d"], ["90D", "90d"]] as const).map(([t, p]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{t}</span>)}</div>
           </div>
           <div style={{ height: 260 }}>
             <ResponsiveContainer>

@@ -111,7 +111,7 @@ export class WooCommerceConnector implements Connector {
       throw new Error('WooCommerce not configured — set WOO_STORE_URL, WOO_CONSUMER_KEY, WOO_CONSUMER_SECRET.');
     }
     const now = Date.now();
-    const after = new Date(now - 60 * DAY).toISOString();
+    const after = new Date(now - 180 * DAY).toISOString(); // 180d history for period filtering
 
     const [ordersRaw, productsRaw] = await Promise.all([
       this.fetchAll('orders', { after, status: 'any', orderby: 'date', order: 'desc' }) as Promise<WooOrder[]>,
@@ -147,10 +147,21 @@ export class WooCommerceConnector implements Connector {
     const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
     const wd = (ms: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(ms).getUTCDay()];
     const byDay = new Map<string, number>();
-    for (const r of rows) byDay.set(r.day, (byDay.get(r.day) || 0) + r.t);
+    const byDayCount = new Map<string, number>();
+    for (const r of rows) {
+      byDay.set(r.day, (byDay.get(r.day) || 0) + r.t);
+      byDayCount.set(r.day, (byDayCount.get(r.day) || 0) + 1);
+    }
     const revenueSeries = Array.from({ length: 7 }, (_, k) => {
       const ms = now - (6 - k) * DAY;
       return { d: wd(ms), rev: Math.round(byDay.get(dayKey(ms)) || 0), prev: Math.round(byDay.get(dayKey(ms - 7 * DAY)) || 0) };
+    });
+
+    // 180 days of daily revenue + order counts (for the dashboard period filter).
+    const dailySeries = Array.from({ length: 180 }, (_, k) => {
+      const ms = now - (179 - k) * DAY;
+      const key = dayKey(ms);
+      return { date: key, rev: Math.round(byDay.get(key) || 0), orders: byDayCount.get(key) || 0 };
     });
 
     // Products — top by lifetime units sold; aiScore scaled from sales for the trending/restock rules.
@@ -179,7 +190,7 @@ export class WooCommerceConnector implements Connector {
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
 
-    this.logger.log(`WooCommerce sync: ${products.length} products, ${rows.length} paid orders (60d).`);
-    return { products, kpis, revenueSeries };
+    this.logger.log(`WooCommerce sync: ${products.length} products, ${rows.length} paid orders (180d).`);
+    return { products, kpis, revenueSeries, dailySeries };
   }
 }

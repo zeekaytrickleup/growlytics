@@ -22,11 +22,11 @@ export class DashboardService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async getOverview(workspaceId: string = WORKSPACE_ID) {
+  async getOverview(workspaceId: string = WORKSPACE_ID, periodDays = 30) {
     try {
       const ws = await this.prisma.workspace.findUnique({ where: { id: workspaceId } });
       if (ws) {
-        const live = await this.buildLiveOverview(workspaceId);
+        const live = await this.buildLiveOverview(workspaceId, periodDays);
         if (live) return live;
       }
     } catch (err) {
@@ -35,7 +35,7 @@ export class DashboardService {
     return this.getMockOverview();
   }
 
-  private async buildLiveOverview(workspaceId: string) {
+  private async buildLiveOverview(workspaceId: string, periodDays = 30) {
     const [metrics, products, insights] = await Promise.all([
       this.prisma.metricSnapshot.findMany({
         where: { workspaceId },
@@ -55,20 +55,31 @@ export class DashboardService {
     if (!metrics.length && !products.length) return null;
 
     const byMetric = (m: string) => metrics.filter((r) => r.metric === m);
-    const cur = new Map(byMetric('kpi').map((r) => [r.dimension, r.value]));
-    const prev = new Map(byMetric('kpi_prev').map((r) => [r.dimension, r.value]));
+    const dayRev = new Map(byMetric('day_rev').map((r) => [r.dimension!, r.value]));
+    const dayOrd = new Map(byMetric('day_ord').map((r) => [r.dimension!, r.value]));
 
-    const kpis = KPI_CONFIG.filter((c) => cur.has(c.key)).map((c) => {
-      const v = cur.get(c.key)!;
-      const p = prev.get(c.key) ?? v;
-      const deltaPct = p ? Math.round(Math.abs((v - p) / p) * 100) : 0;
-      return { key: c.key, label: c.label, value: c.fmt(v), delta: `${deltaPct}%`, kind: v >= p ? 'up' : 'down' };
-    });
+    let kpis: { key: string; label: string; value: string; delta: string; kind: string }[];
+    let revenueSeries: { d: string; rev: number; prev: number }[];
 
-    // Rebuild the day-ordered revenue series from the two daily metrics.
-    const revThis = byMetric('revenue');
-    const prevMap = new Map(byMetric('revenue_prev').map((r) => [r.dimension, r.value]));
-    const revenueSeries = revThis.map((r) => ({ d: r.dimension!, rev: r.value, prev: prevMap.get(r.dimension!) ?? 0 }));
+    if (dayRev.size) {
+      // Period-filtered path: compute from daily history for the selected window.
+      const computed = this.periodMetrics(dayRev, dayOrd, periodDays);
+      kpis = computed.kpis;
+      revenueSeries = computed.revenueSeries;
+    } else {
+      // Fallback: pre-aggregated kpi/revenue snapshots (period ignored).
+      const cur = new Map(byMetric('kpi').map((r) => [r.dimension, r.value]));
+      const prev = new Map(byMetric('kpi_prev').map((r) => [r.dimension, r.value]));
+      kpis = KPI_CONFIG.filter((c) => cur.has(c.key)).map((c) => {
+        const v = cur.get(c.key)!;
+        const p = prev.get(c.key) ?? v;
+        const deltaPct = p ? Math.round(Math.abs((v - p) / p) * 100) : 0;
+        return { key: c.key, label: c.label, value: c.fmt(v), delta: `${deltaPct}%`, kind: v >= p ? 'up' : 'down' };
+      });
+      const revThis = byMetric('revenue');
+      const prevMap = new Map(byMetric('revenue_prev').map((r) => [r.dimension, r.value]));
+      revenueSeries = revThis.map((r) => ({ d: r.dimension!, rev: r.value, prev: prevMap.get(r.dimension!) ?? 0 }));
+    }
 
     const trafficSources = byMetric('traffic').map((r) => ({ name: r.dimension!, value: r.value }));
 
@@ -94,6 +105,62 @@ export class DashboardService {
       trafficSources,
       topProducts,
     };
+  }
+
+  /** Compute KPIs + revenue chart for a period window from daily history. */
+  private periodMetrics(dayRev: Map<string, number>, dayOrd: Map<string, number>, periodDays: number) {
+    const DAYMS = 86_400_000;
+    const key = (offset: number) => new Date(Date.now() - offset * DAYMS).toISOString().slice(0, 10);
+    const sumWin = (map: Map<string, number>, startOff: number, endOff: number) => {
+      let s = 0;
+      for (let d = endOff; d < startOff; d++) s += map.get(key(d)) || 0;
+      return s;
+    };
+    const revCur = sumWin(dayRev, periodDays, 0);
+    const revPrev = sumWin(dayRev, 2 * periodDays, periodDays);
+    const ordCur = sumWin(dayOrd, periodDays, 0);
+    const ordPrev = sumWin(dayOrd, 2 * periodDays, periodDays);
+    const vals: Record<string, [number, number]> = {
+      revenue: [revCur, revPrev],
+      orders: [ordCur, ordPrev],
+      profit: [revCur * 0.36, revPrev * 0.36],
+      aov: [ordCur ? revCur / ordCur : 0, ordPrev ? revPrev / ordPrev : 0],
+    };
+    const kpis = KPI_CONFIG.filter((c) => c.key in vals).map((c) => {
+      const [v, p] = vals[c.key];
+      const deltaPct = p ? Math.round(Math.abs((v - p) / p) * 100) : 0;
+      return { key: c.key, label: c.label, value: c.fmt(v), delta: `${deltaPct}%`, kind: v >= p ? 'up' : 'down' };
+    });
+    return { kpis, revenueSeries: this.buildSeries(dayRev, periodDays) };
+  }
+
+  private buildSeries(dayRev: Map<string, number>, periodDays: number) {
+    const DAYMS = 86_400_000;
+    const now = Date.now();
+    const key = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const wd = (ms: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(ms).getUTCDay()];
+    const md = (ms: number) => {
+      const dt = new Date(ms);
+      return `${dt.getUTCMonth() + 1}/${dt.getUTCDate()}`;
+    };
+    if (periodDays <= 30) {
+      const n = periodDays;
+      return Array.from({ length: n }, (_, k) => {
+        const ms = now - (n - 1 - k) * DAYMS;
+        return { d: n <= 7 ? wd(ms) : md(ms), rev: Math.round(dayRev.get(key(ms)) || 0), prev: Math.round(dayRev.get(key(ms - n * DAYMS)) || 0) };
+      });
+    }
+    const weeks = Math.ceil(periodDays / 7);
+    return Array.from({ length: weeks }, (_, w) => {
+      const endMs = now - (weeks - 1 - w) * 7 * DAYMS;
+      let rev = 0;
+      let prev = 0;
+      for (let d = 0; d < 7; d++) {
+        rev += dayRev.get(key(endMs - d * DAYMS)) || 0;
+        prev += dayRev.get(key(endMs - (d + periodDays) * DAYMS)) || 0;
+      }
+      return { d: md(endMs), rev: Math.round(rev), prev: Math.round(prev) };
+    });
   }
 
   /** All products for a workspace (for the Products + Inventory tabs). */
