@@ -11,6 +11,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { ReportsModule } from './reports/reports.module';
 import { AuthModule } from './auth/auth.module';
 import { BootstrapModule } from './bootstrap/bootstrap.module';
+import { CustomersModule } from './customers/customers.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { BootstrapModule } from './bootstrap/bootstrap.module';
     InsightsModule,
     IntegrationsModule,
     ReportsModule,
+    CustomersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -45,6 +45,10 @@ export const fetchOverview = () => getJson<Overview>("/dashboard/overview");
 export const fetchProducts = () =>
   getJson<{ source: string; products: OverviewProduct[] }>("/dashboard/products").then((r) => r?.products ?? null);
 
+export type CustomerSegment = { name: string; n: number; val: string; color: string; ai: string };
+export const fetchCustomerSegments = () =>
+  getJson<{ source: string; segments: CustomerSegment[] }>("/customers").then((r) => r?.segments ?? null);
+
 export type AIAnswer = {
   analysis: string;
   reason: string;

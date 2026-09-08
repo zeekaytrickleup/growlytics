@@ -14,7 +14,7 @@ import {
   Wallet, RefreshCw, Lightbulb, ArrowRight, Globe, Search as SearchIcon,
 } from "lucide-react";
 import {
-  fetchOverview, fetchProducts, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
+  fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
   fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace,
   type Overview, type Integration, type ReportSummary, type Me,
 } from "../lib/api";
@@ -769,15 +769,18 @@ function Products() {
 }
 
 /* ---------------- Customers ---------------- */
+const MOCK_SEGS = [
+  { name: "VIP", n: 214, val: "$182k", color: "var(--amber)", ai: "Offer early access" },
+  { name: "Loyal", n: 892, val: "$310k", color: "var(--emerald)", ai: "Referral program" },
+  { name: "Repeat Buyers", n: 1340, val: "$228k", color: "var(--primary-2)", ai: "Cross-sell bundles" },
+  { name: "One-Time", n: 3120, val: "$96k", color: "var(--blue)", ai: "Welcome flow #2" },
+  { name: "Dormant", n: 980, val: "$41k", color: "var(--mute)", ai: "Win-back 15%" },
+  { name: "Churn Risk", n: 184, val: "$68k", color: "var(--red)", ai: "Personal outreach" },
+];
 function Customers() {
-  const segs = [
-    { name: "VIP", n: 214, val: "$182k", color: "var(--amber)", ai: "Offer early access" },
-    { name: "Loyal", n: 892, val: "$310k", color: "var(--emerald)", ai: "Referral program" },
-    { name: "Repeat Buyers", n: 1340, val: "$228k", color: "var(--primary-2)", ai: "Cross-sell bundles" },
-    { name: "One-Time", n: 3120, val: "$96k", color: "var(--blue)", ai: "Welcome flow #2" },
-    { name: "Dormant", n: 980, val: "$41k", color: "var(--mute)", ai: "Win-back 15%" },
-    { name: "Churn Risk", n: 184, val: "$68k", color: "var(--red)", ai: "Personal outreach" },
-  ];
+  const [segs, setSegs] = useState(MOCK_SEGS);
+  useEffect(() => { fetchCustomerSegments().then(s => { if (s?.length) setSegs(s); }); }, []);
+  const totalCustomers = segs.reduce((sum, s) => sum + s.n, 0);
   return (
     <div className="content fade-up">
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))" }}>
@@ -798,7 +801,7 @@ function Customers() {
       </div>
       <div className="card pad-lg" style={{ background: "linear-gradient(150deg, rgba(248,113,113,0.08), var(--surface))" }}>
         <div className="ai-block-label" style={{ color: "var(--red)" }}><AlertTriangle size={13} /> Retention priority</div>
-        <p style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.55, marginTop: 4 }}>184 previously loyal customers are drifting toward churn. A targeted win-back with a 15% returning-customer offer to the 38 highest-LTV accounts could retain <b>~$6.8k</b> in lifetime value.</p>
+        <p style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.55, marginTop: 4 }}>You have <b>{totalCustomers.toLocaleString()}</b> customers across {segs.length} segments. Target your <b>{segs.find(s => s.name === "One-Time")?.n ?? 0}</b> one-time buyers with a returning-customer offer, and re-engage the <b>{segs.find(s => s.name === "No Orders" || s.name === "Dormant")?.n ?? 0}</b> who haven't purchased to lift repeat revenue.</p>
         <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
           <button className="btn primary"><Mail size={14} /> Launch win-back flow</button>
           <button className="btn ghost">Export segment</button>
@@ -1101,6 +1104,20 @@ function SettingsPage() {
   );
 }
 
+/* ---------------- Revenue (live) ---------------- */
+function Revenue() {
+  const [o, setO] = useState<Overview | null>(null);
+  useEffect(() => { fetchOverview().then(setO); }, []);
+  const keys = ["revenue", "profit", "aov", "orders"];
+  const kpis = (o?.kpis ?? []).filter(k => keys.includes(k.key)).map(k => {
+    const p = KPI_PRESENTATION[k.key] ?? { icon: DollarSign, label: k.label, color: "var(--primary-2)" };
+    return { icon: p.icon, label: p.label, value: k.value, delta: k.delta, kind: k.kind, color: p.color };
+  });
+  const chart = (o?.revenueSeries ?? revenueData).map(r => ({ k: r.d, v: r.rev }));
+  const aiNote = o?.insights?.[0]?.body ?? "Daily revenue trend from your connected store.";
+  return <MetricScreen title="Revenue" sub="Daily revenue from your connected store" kpis={kpis.length ? kpis : undefined} chart={chart} aiNote={aiNote} />;
+}
+
 /* ---------------- Inventory (live) ---------------- */
 function Inventory() {
   const [products, setProducts] = useState<typeof topProducts>([]);
@@ -1232,10 +1249,7 @@ export default function GrowthOS() {
       case "integrations": return <Integrations />;
       case "reports": return <Reports />;
       case "settings": return <SettingsPage />;
-      case "revenue": return <MetricScreen title="Revenue" sub="Daily net revenue trend"
-        kpis={[{ icon: DollarSign, label: "MRR-equiv", value: "$81.2k", delta: "18%", kind: "up", color: "var(--emerald)" }, { icon: Wallet, label: "Net Profit", value: "$29.4k", delta: "14%", kind: "up", color: "var(--emerald)" }, { icon: Percent, label: "Net Margin", value: "36%", delta: "2%", kind: "up", color: "var(--primary-2)" }, { icon: DollarSign, label: "AOV", value: "$41.8", delta: "3%", kind: "up", color: "var(--blue)" }]}
-        chart={revenueData.map(r => ({ k: r.d, v: r.rev }))}
-        aiNote="Weekend accounts for 58% of weekly revenue. Concentrate ad budget Thu–Sun and schedule the abandoned-cart flow for Friday evenings to capture peak intent." />;
+      case "revenue": return <Revenue />;
       case "seo": return <MetricScreen title="Organic Clicks" sub="Search Console · trending up"
         kpis={[{ icon: SearchIcon, label: "Clicks", value: "7.9k", delta: "22%", kind: "up", color: "var(--emerald)" }, { icon: Percent, label: "CTR", value: "3.8%", delta: "5%", kind: "up", color: "var(--primary-2)" }, { icon: Activity, label: "Impressions", value: "208k", delta: "17%", kind: "up", color: "var(--blue)" }, { icon: TrendingUp, label: "Avg Position", value: "8.4", delta: "1.2", kind: "up", color: "var(--purple)" }]}
         chart={seoChart} tableHead={["Keyword", "Clicks", "CTR", "Position", "Change"]}

@@ -59,6 +59,45 @@ export class WooCommerceConnector implements Connector {
     return all;
   }
 
+  /** Compute customer segments from the store's customers (RFM-ish, mutually exclusive). */
+  async customerSegments() {
+    const customers = (await this.fetchAll('customers', { orderby: 'registered_date', order: 'desc', role: 'all' })) as {
+      orders_count: number;
+      total_spent: string;
+    }[];
+
+    const buckets: Record<string, { n: number; ltv: number }> = {
+      VIP: { n: 0, ltv: 0 },
+      Loyal: { n: 0, ltv: 0 },
+      'Repeat Buyers': { n: 0, ltv: 0 },
+      'One-Time': { n: 0, ltv: 0 },
+      'No Orders': { n: 0, ltv: 0 },
+    };
+    for (const c of customers) {
+      const spent = parseFloat(c.total_spent) || 0;
+      const orders = c.orders_count || 0;
+      const key = spent >= 200 ? 'VIP' : orders >= 3 ? 'Loyal' : orders === 2 ? 'Repeat Buyers' : orders === 1 ? 'One-Time' : 'No Orders';
+      buckets[key].n += 1;
+      buckets[key].ltv += spent;
+    }
+
+    const meta: Record<string, { color: string; ai: string }> = {
+      VIP: { color: 'var(--amber)', ai: 'Offer early access' },
+      Loyal: { color: 'var(--emerald)', ai: 'Referral program' },
+      'Repeat Buyers': { color: 'var(--primary-2)', ai: 'Cross-sell bundles' },
+      'One-Time': { color: 'var(--blue)', ai: 'Welcome flow #2' },
+      'No Orders': { color: 'var(--mute)', ai: 'First-purchase offer' },
+    };
+    const fmt = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`);
+    return Object.entries(buckets).map(([name, b]) => ({
+      name,
+      n: b.n,
+      val: fmt(b.ltv),
+      color: meta[name].color,
+      ai: meta[name].ai,
+    }));
+  }
+
   async sync(): Promise<SyncResult> {
     if (!this.configured) {
       throw new Error('WooCommerce not configured — set WOO_STORE_URL, WOO_CONSUMER_KEY, WOO_CONSUMER_SECRET.');
