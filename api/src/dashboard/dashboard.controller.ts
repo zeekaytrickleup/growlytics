@@ -9,9 +9,18 @@ export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
   @Get('overview')
-  getOverview(@Workspace() workspaceId: string, @Query('period') period?: string) {
+  getOverview(
+    @Workspace() workspaceId: string,
+    @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    // A valid from+to custom range takes precedence over the preset period.
+    if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return this.dashboard.getOverview(workspaceId, { from, to });
+    }
     const days = PERIOD_DAYS[period ?? '30d'] ?? 30;
-    return this.dashboard.getOverview(workspaceId, days);
+    return this.dashboard.getOverview(workspaceId, { days });
   }
 
   @Get('products')

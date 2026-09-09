@@ -12,6 +12,7 @@ import {
   AlertTriangle, Clock, ChevronRight, Plus, Send, Menu,
   DollarSign, ShoppingCart, Percent, Repeat, Star, Download, Cpu, Flame,
   Wallet, RefreshCw, Lightbulb, ArrowRight, Globe, Search as SearchIcon,
+  Calendar, SlidersHorizontal,
 } from "lucide-react";
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
@@ -189,6 +190,16 @@ const STYLES = `
 .chip { font-size: 12px; padding: 7px 13px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--dim); cursor: pointer; transition: all .16s; }
 .chip:hover { color: var(--text); }
 .chip.active { background: rgba(91,91,214,0.18); color: #fff; border-color: rgba(124,124,240,0.4); }
+
+/* dashboard filter bar */
+.filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; padding: 12px 14px; background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.filterbar .fb-label { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--dim); margin-right: 2px; }
+.filterbar .fb-seg { display: flex; gap: 6px; }
+.filterbar .fb-spacer { flex: 1; }
+.filterbar .fb-range { display: flex; align-items: center; gap: 8px; }
+.fb-date { font-size: 12px; padding: 7px 10px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); cursor: pointer; color-scheme: dark; }
+.fb-date:focus { outline: none; border-color: rgba(124,124,240,0.4); }
+.fb-dash { color: var(--mute); font-size: 12px; }
 
 /* progress ring */
 .ring-wrap { display: grid; place-items: center; position: relative; }
@@ -422,13 +433,27 @@ function Dashboard({ go }: { go: (id: string) => void }) {
   const [data, setData] = useState<Overview | null>(null);
   const [live, setLive] = useState(false);
   const [period, setPeriod] = useState("30d");
+  // Custom date range ("any date"). When both set, it overrides the preset period.
+  const [range, setRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [showCustom, setShowCustom] = useState(false);
+  const customActive = !!(range.from && range.to);
+
   useEffect(() => {
     let mounted = true;
-    fetchOverview(period).then(o => {
+    const query = customActive ? { from: range.from, to: range.to } : period;
+    fetchOverview(query).then(o => {
       if (mounted && o) { setData(o); setLive(true); }
     });
     return () => { mounted = false; };
-  }, [period]);
+  }, [period, range.from, range.to, customActive]);
+
+  // Human label for the current selection, shown on the Revenue card.
+  const rangeLabel = customActive
+    ? `${range.from} → ${range.to}`
+    : period === "7d" ? "Last 7 days" : period === "30d" ? "Last 30 days" : "Last 90 days";
+
+  // Picking a preset clears any custom range; picking a custom range clears the preset highlight.
+  const pickPreset = (p: string) => { setRange({ from: "", to: "" }); setPeriod(p); };
 
   const kpiData = data?.kpis ?? FALLBACK_KPIS;
   const insightData = data?.insights ?? FALLBACK_INSIGHTS;
@@ -438,8 +463,35 @@ function Dashboard({ go }: { go: (id: string) => void }) {
   }));
   const products = data?.topProducts ?? topProducts;
 
+  const todayStr = new Date().toISOString().slice(0, 10);
+
   return (
     <div className="content fade-up">
+      <div className="filterbar">
+        <div className="fb-label"><SlidersHorizontal size={15} className="accent" /> Showing</div>
+        <div className="fb-seg">
+          {([["This week", "7d"], ["This month", "30d"], ["Last 90 days", "90d"]] as const).map(([t, p]) => (
+            <span key={p} className={`chip ${!customActive && period === p ? "active" : ""}`} onClick={() => pickPreset(p)}>{t}</span>
+          ))}
+        </div>
+        <div className="fb-spacer" />
+        <span className={`chip ${showCustom || customActive ? "active" : ""}`} onClick={() => setShowCustom(s => !s)}>
+          <Calendar size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />Custom date
+        </span>
+        {(showCustom || customActive) && (
+          <div className="fb-range">
+            <input type="date" className="fb-date" max={range.to || todayStr} value={range.from}
+              onChange={e => setRange(r => ({ ...r, from: e.target.value }))} />
+            <span className="fb-dash">→</span>
+            <input type="date" className="fb-date" min={range.from || undefined} max={todayStr} value={range.to}
+              onChange={e => setRange(r => ({ ...r, to: e.target.value }))} />
+            {customActive && (
+              <span className="chip" onClick={() => { setRange({ from: "", to: "" }); setShowCustom(false); }}>Clear</span>
+            )}
+          </div>
+        )}
+      </div>
+
       <div>
         <div className="section-label" style={{ marginBottom: 12 }}>
           <Sparkles size={15} className="accent" /> What should you do today?
@@ -472,8 +524,7 @@ function Dashboard({ go }: { go: (id: string) => void }) {
       <div className="grid" style={{ gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr)" }}>
         <div className="card pad-lg">
           <div className="card-head">
-            <div><div className="card-title">Revenue</div><div className="card-sub">{period === "7d" ? "Last 7 days" : period === "30d" ? "Last 30 days" : "Last 90 days"} vs. previous period</div></div>
-            <div style={{ display: "flex", gap: 8 }}>{([["7D", "7d"], ["30D", "30d"], ["90D", "90d"]] as const).map(([t, p]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{t}</span>)}</div>
+            <div><div className="card-title">Revenue</div><div className="card-sub">{rangeLabel} vs. previous period</div></div>
           </div>
           <div style={{ height: 260 }}>
             <ResponsiveContainer>

@@ -22,11 +22,11 @@ export class DashboardService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async getOverview(workspaceId: string = WORKSPACE_ID, periodDays = 30) {
+  async getOverview(workspaceId: string = WORKSPACE_ID, opts: { days?: number; from?: string; to?: string } = {}) {
     try {
       const ws = await this.prisma.workspace.findUnique({ where: { id: workspaceId } });
       if (ws) {
-        const live = await this.buildLiveOverview(workspaceId, periodDays);
+        const live = await this.buildLiveOverview(workspaceId, opts);
         if (live) return live;
       }
     } catch (err) {
@@ -35,7 +35,8 @@ export class DashboardService {
     return this.getMockOverview();
   }
 
-  private async buildLiveOverview(workspaceId: string, periodDays = 30) {
+  private async buildLiveOverview(workspaceId: string, opts: { days?: number; from?: string; to?: string } = {}) {
+    const periodDays = opts.days ?? 30;
     const [metrics, products, insights] = await Promise.all([
       this.prisma.metricSnapshot.findMany({
         where: { workspaceId },
@@ -61,8 +62,13 @@ export class DashboardService {
     let kpis: { key: string; label: string; value: string; delta: string; kind: string }[];
     let revenueSeries: { d: string; rev: number; prev: number }[];
 
-    if (dayRev.size) {
-      // Period-filtered path: compute from daily history for the selected window.
+    if (dayRev.size && opts.from && opts.to) {
+      // Custom date-range path: compute KPIs + chart between two explicit dates.
+      const computed = this.rangeMetrics(dayRev, dayOrd, opts.from, opts.to);
+      kpis = computed.kpis;
+      revenueSeries = computed.revenueSeries;
+    } else if (dayRev.size) {
+      // Preset-period path: compute from daily history for the selected window.
       const computed = this.periodMetrics(dayRev, dayOrd, periodDays);
       kpis = computed.kpis;
       revenueSeries = computed.revenueSeries;
@@ -132,6 +138,73 @@ export class DashboardService {
       return { key: c.key, label: c.label, value: c.fmt(v), delta: `${deltaPct}%`, kind: v >= p ? 'up' : 'down' };
     });
     return { kpis, revenueSeries: this.buildSeries(dayRev, periodDays) };
+  }
+
+  /** Compute KPIs + revenue chart for an explicit [from, to] date range (inclusive, YYYY-MM-DD). */
+  private rangeMetrics(dayRev: Map<string, number>, dayOrd: Map<string, number>, from: string, to: string) {
+    const DAYMS = 86_400_000;
+    // Normalize order + parse to UTC midnight.
+    let start = Date.parse(from + 'T00:00:00Z');
+    let end = Date.parse(to + 'T00:00:00Z');
+    if (isNaN(start) || isNaN(end)) return this.periodMetrics(dayRev, dayOrd, 30);
+    if (start > end) [start, end] = [end, start];
+    const spanDays = Math.round((end - start) / DAYMS) + 1;
+    const key = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const sumRange = (map: Map<string, number>, s: number, e: number) => {
+      let acc = 0;
+      for (let ms = s; ms <= e; ms += DAYMS) acc += map.get(key(ms)) || 0;
+      return acc;
+    };
+    // Previous comparison window = the same-length span immediately before `from`.
+    const prevEnd = start - DAYMS;
+    const prevStart = prevEnd - (spanDays - 1) * DAYMS;
+    const revCur = sumRange(dayRev, start, end);
+    const revPrev = sumRange(dayRev, prevStart, prevEnd);
+    const ordCur = sumRange(dayOrd, start, end);
+    const ordPrev = sumRange(dayOrd, prevStart, prevEnd);
+    const vals: Record<string, [number, number]> = {
+      revenue: [revCur, revPrev],
+      orders: [ordCur, ordPrev],
+      profit: [revCur * 0.36, revPrev * 0.36],
+      aov: [ordCur ? revCur / ordCur : 0, ordPrev ? revPrev / ordPrev : 0],
+    };
+    const kpis = KPI_CONFIG.filter((c) => c.key in vals).map((c) => {
+      const [v, p] = vals[c.key];
+      const deltaPct = p ? Math.round(Math.abs((v - p) / p) * 100) : 0;
+      return { key: c.key, label: c.label, value: c.fmt(v), delta: `${deltaPct}%`, kind: v >= p ? 'up' : 'down' };
+    });
+    return { kpis, revenueSeries: this.buildRangeSeries(dayRev, start, end, spanDays) };
+  }
+
+  /** Revenue chart for an explicit date range: daily points up to ~31 days, else weekly buckets. */
+  private buildRangeSeries(dayRev: Map<string, number>, start: number, end: number, spanDays: number) {
+    const DAYMS = 86_400_000;
+    const key = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const md = (ms: number) => {
+      const dt = new Date(ms);
+      return `${dt.getUTCMonth() + 1}/${dt.getUTCDate()}`;
+    };
+    const wd = (ms: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(ms).getUTCDay()];
+    const spanMs = spanDays * DAYMS;
+    if (spanDays <= 31) {
+      return Array.from({ length: spanDays }, (_, k) => {
+        const ms = start + k * DAYMS;
+        return { d: spanDays <= 7 ? wd(ms) : md(ms), rev: Math.round(dayRev.get(key(ms)) || 0), prev: Math.round(dayRev.get(key(ms - spanMs)) || 0) };
+      });
+    }
+    const weeks = Math.ceil(spanDays / 7);
+    return Array.from({ length: weeks }, (_, w) => {
+      const wkStart = start + w * 7 * DAYMS;
+      let rev = 0;
+      let prev = 0;
+      for (let d = 0; d < 7; d++) {
+        const ms = wkStart + d * DAYMS;
+        if (ms > end) break;
+        rev += dayRev.get(key(ms)) || 0;
+        prev += dayRev.get(key(ms - spanMs)) || 0;
+      }
+      return { d: md(wkStart), rev: Math.round(rev), prev: Math.round(prev) };
+    });
   }
 
   private buildSeries(dayRev: Map<string, number>, periodDays: number) {

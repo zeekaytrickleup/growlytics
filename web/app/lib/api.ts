@@ -40,8 +40,14 @@ export type Me = {
 };
 export const fetchMe = () => getJson<Me>("/me");
 
-export const fetchOverview = (period?: string) =>
-  getJson<Overview>(`/dashboard/overview${period ? `?period=${period}` : ""}`);
+// Fetch the dashboard overview. Pass a preset period ("7d"/"30d"/"90d"),
+// or a custom { from, to } date range (YYYY-MM-DD) which takes precedence.
+export const fetchOverview = (opts?: string | { from: string; to: string }) => {
+  let qs = "";
+  if (typeof opts === "string") qs = `?period=${opts}`;
+  else if (opts?.from && opts?.to) qs = `?from=${opts.from}&to=${opts.to}`;
+  return getJson<Overview>(`/dashboard/overview${qs}`);
+};
 
 export const fetchProducts = () =>
   getJson<{ source: string; products: OverviewProduct[] }>("/dashboard/products").then((r) => r?.products ?? null);
