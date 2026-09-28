@@ -780,27 +780,40 @@ function AIAssistant() {
 /* ---------------- Products ---------------- */
 function Products() {
   const [products, setProducts] = useState(topProducts);
+  const [filter, setFilter] = useState<"all" | "trending" | "lowstock">("all");
   useEffect(() => { fetchProducts().then(p => { if (p?.length) setProducts(p as typeof topProducts); }); }, []);
   const detail = products[0];
+  // Trending = AI trend "up"; Low stock = tracked quantity under 20 (untracked stock < 0 never counts).
+  const shown = products.filter(p =>
+    filter === "trending" ? p.trend === "up" : filter === "lowstock" ? p.stock >= 0 && p.stock < 20 : true,
+  );
+  const chips: [string, typeof filter][] = [["All", "all"], ["Trending", "trending"], ["Low stock", "lowstock"]];
   return (
     <div className="content fade-up">
       <div className="card pad-lg">
-        <div className="card-head"><div><div className="card-title">Product Intelligence</div><div className="card-sub">{products.length} products · AI-scored for revenue potential</div></div>
-          <div style={{ display: "flex", gap: 8 }}><span className="chip active">All</span><span className="chip">Trending</span><span className="chip">Low stock</span></div></div>
+        <div className="card-head"><div><div className="card-title">Product Intelligence</div><div className="card-sub">{shown.length} of {products.length} products · AI-scored for revenue potential</div></div>
+          <div style={{ display: "flex", gap: 8 }}>{chips.map(([label, key]) => (
+            <span key={key} className={`chip ${filter === key ? "active" : ""}`} onClick={() => setFilter(key)}>{label}</span>
+          ))}</div></div>
         <table className="tbl">
           <thead><tr><th>Product</th><th>Revenue</th><th>Profit</th><th>CR</th><th>Stock</th><th>Suggested price</th><th>AI</th></tr></thead>
           <tbody>
-            {products.map((p, i) => (
+            {shown.map((p, i) => (
               <tr key={p.name}>
                 <td className="name">{p.name}</td>
                 <td className="mono">{p.rev}</td>
                 <td className="mono" style={{ color: "var(--emerald)" }}>${(parseFloat(p.rev.replace(/[$k]/g, "")) * 0.36).toFixed(1)}k</td>
                 <td className="mono">{p.cr}%</td>
-                <td><span className="mono" style={{ color: p.stock > 0 && p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock < 0 ? "In stock" : p.stock}</span></td>
+                <td><span className="mono" style={{ color: p.stock >= 0 && p.stock < 20 ? "var(--red)" : "var(--dim)" }}>{p.stock < 0 ? "In stock" : p.stock}</span></td>
                 <td className="mono">${(41 + i * 3.4).toFixed(2)}</td>
-                <td>{i === 0 ? <Badge kind="up">Scale ads</Badge> : i === 2 ? <Badge kind="warn">Restock</Badge> : <Badge kind="info">Bundle</Badge>}</td>
+                <td>{p.trend === "up" ? <Badge kind="up">Scale ads</Badge> : p.trend === "down" ? <Badge kind="warn">Restock</Badge> : <Badge kind="info">Bundle</Badge>}</td>
               </tr>
             ))}
+            {shown.length === 0 && (
+              <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--mute)", padding: "22px 0" }}>
+                {filter === "lowstock" ? "No products are low on stock — this store doesn't track stock quantities." : "No products match this filter."}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
