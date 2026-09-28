@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
-  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace,
-  type Overview, type Integration, type ReportSummary, type Me, type WooCreds,
+  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, fetchMarketing,
+  type Overview, type Integration, type ReportSummary, type Me, type WooCreds, type Marketing,
 } from "../lib/api";
 
 /* ============================================================
@@ -888,8 +888,25 @@ function Customers() {
 }
 
 /* ---------------- Marketing ---------------- */
+const MKT_KPI_ICON: Record<string, { icon: typeof Wallet; color: string }> = {
+  spend: { icon: Wallet, color: "var(--blue)" },
+  attrRev: { icon: DollarSign, color: "var(--emerald)" },
+  roas: { icon: Target, color: "var(--primary-2)" },
+  conv: { icon: Users, color: "var(--purple)" },
+};
+
 function Marketing() {
-  const ch = [
+  const [data, setData] = useState<Marketing | null>(null);
+  const [live, setLive] = useState(false);
+  useEffect(() => { fetchMarketing().then(m => { if (m) { setData(m); setLive(m.source === "live"); } }); }, []);
+
+  const kpis = data?.kpis ?? [
+    { key: "spend", label: "Total Spend", value: "$19.8k", delta: "4%", kind: "up" },
+    { key: "attrRev", label: "Attributed Revenue", value: "$91.8k", delta: "16%", kind: "up" },
+    { key: "roas", label: "Blended ROAS", value: "4.6x", delta: "8%", kind: "up" },
+    { key: "conv", label: "Conversions", value: "1,204", delta: "11%", kind: "up" },
+  ];
+  const ch = data?.channels ?? [
     { name: "Google Ads", spend: "$8.2k", rev: "$34.1k", roas: "4.2x", cpa: "$12", ctr: "3.1%", conv: 812, kind: "up", rec: "Scale Shopping" },
     { name: "Meta Ads", spend: "$6.9k", rev: "$19.8k", roas: "2.9x", cpa: "$18", ctr: "1.8%", conv: 540, kind: "down", rec: "Refresh creative" },
     { name: "TikTok Ads", spend: "$3.1k", rev: "$11.4k", roas: "3.7x", cpa: "$14", ctr: "2.4%", conv: 288, kind: "up", rec: "Test UGC" },
@@ -898,14 +915,19 @@ function Marketing() {
   ];
   return (
     <div className="content fade-up">
+      <div className="section-label" style={{ marginBottom: -4 }}>
+        <Megaphone size={15} className="accent" /> Marketing performance
+        <span className={`badge ${live ? "up" : "neutral"}`} style={{ marginLeft: "auto" }}>{live ? "● Live data" : "○ Demo data"}</span>
+      </div>
       <div className="kpi-grid">
-        <KPI icon={Wallet} label="Total Spend" value="$19.8k" delta="4%" kind="up" color="var(--blue)" />
-        <KPI icon={DollarSign} label="Attributed Revenue" value="$91.8k" delta="16%" kind="up" color="var(--emerald)" />
-        <KPI icon={Target} label="Blended ROAS" value="4.6x" delta="8%" kind="up" color="var(--primary-2)" />
-        <KPI icon={Users} label="New Customers" value="1,204" delta="11%" kind="up" color="var(--purple)" />
+        {kpis.map(k => {
+          const p = MKT_KPI_ICON[k.key] ?? { icon: Wallet, color: "var(--blue)" };
+          return <KPI key={k.key} icon={p.icon} label={k.label} value={k.value} delta={k.delta} kind={k.kind} color={p.color} />;
+        })}
       </div>
       <div className="card pad-lg">
         <div className="card-head"><div className="card-title">Channel Performance</div><span className="chip">Last 30 days</span></div>
+        {!live && <div style={{ fontSize: 11.5, color: "var(--mute)", marginBottom: 10 }}>Sample data — connect Klaviyo, Meta or Google Ads in Integrations to see real numbers.</div>}
         <table className="tbl">
           <thead><tr><th>Channel</th><th>Spend</th><th>Revenue</th><th>ROAS</th><th>CPA</th><th>CTR</th><th>Conv.</th><th>AI recommendation</th></tr></thead>
           <tbody>
@@ -1112,11 +1134,60 @@ function StoreConnectModal({
   );
 }
 
+/** Simple API-key modal for Klaviyo (email marketing). onDone fires on a successful connect. */
+function KlaviyoConnectModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    if (!apiKey.trim()) return setErr("Paste your Klaviyo private API key (pk_...).");
+    setBusy(true); setErr("");
+    const res = await connectIntegration("klaviyo", { apiKey: apiKey.trim() });
+    if (!res || res.status === "error") {
+      setErr(res?.error ? `Klaviyo error: ${res.error}` : "Couldn't connect. Check the API key.");
+      setBusy(false);
+      return;
+    }
+    onDone();
+  };
+  return (
+    <div className="cmd-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--surface-2)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--primary-2)" }}><Mail size={17} /></div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Connect Klaviyo (Email)</div>
+              <div style={{ fontSize: 11.5, color: "var(--mute)" }}>Pulls email revenue, opens & clicks (last 30 days)</div>
+            </div>
+          </div>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <label>Private API key</label>
+            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="pk_xxxxxxxxxxxxxxxxxxxxxxxx" autoFocus />
+            <div className="hint">Klaviyo → Settings → API keys → Create Private API Key (Read-only scopes for Metrics is enough). Encrypted before storage.</div>
+          </div>
+          {err && <div className="form-err">{err}</div>}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button className="btn ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn primary" style={{ flex: 1, justifyContent: "center" }} onClick={submit} disabled={busy}>
+              {busy ? <><RefreshCw size={14} style={{ animation: "spin 1.4s linear infinite" }} /> Connecting…</> : "Connect"}
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
 function Integrations() {
   const [items, setItems] = useState<Integration[]>(FALLBACK_INTEGRATIONS);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [wooModal, setWooModal] = useState<{ url?: string } | null>(null);
+  const [klaviyoModal, setKlaviyoModal] = useState(false);
 
   const load = () => fetchIntegrations().then(list => { if (list) { setItems(list); setLive(true); } });
   useEffect(() => { load(); }, []);
@@ -1126,6 +1197,11 @@ function Integrations() {
     if (provider === "WOOCOMMERCE" && kind === "connect") {
       const existing = items.find(i => i.provider === "WOOCOMMERCE")?.storeUrl ?? undefined;
       setWooModal({ url: existing });
+      return;
+    }
+    // Klaviyo needs a private API key.
+    if (provider === "KLAVIYO" && kind === "connect") {
+      setKlaviyoModal(true);
       return;
     }
     setBusy(provider);
@@ -1181,6 +1257,12 @@ function Integrations() {
           initialUrl={wooModal.url}
           onClose={() => setWooModal(null)}
           onDone={async () => { setWooModal(null); setBusy("WOOCOMMERCE"); await load(); setBusy(null); }}
+        />
+      )}
+      {klaviyoModal && (
+        <KlaviyoConnectModal
+          onClose={() => setKlaviyoModal(false)}
+          onDone={async () => { setKlaviyoModal(false); setBusy("KLAVIYO"); await load(); setBusy(null); }}
         />
       )}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>

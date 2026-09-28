@@ -3,9 +3,13 @@ import { IntegrationStatus, Provider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IngestionService } from '../connectors/ingestion.service';
 import { WooCredentialsService } from '../connectors/woo-credentials.service';
+import { CredentialsStore } from '../connectors/credentials.store';
 
-/** Credentials a user can submit when connecting a WooCommerce store from the dashboard. */
-export type ConnectCredentials = { storeUrl?: string; consumerKey?: string; consumerSecret?: string };
+/** Credentials a user can submit when connecting a data source from the dashboard. */
+export type ConnectCredentials = {
+  storeUrl?: string; consumerKey?: string; consumerSecret?: string; // WooCommerce
+  apiKey?: string; // Klaviyo
+};
 
 const WORKSPACE_ID = 'demo-workspace';
 
@@ -27,6 +31,7 @@ export class IntegrationsService {
     private readonly prisma: PrismaService,
     private readonly ingestion: IngestionService,
     private readonly wooCreds: WooCredentialsService,
+    private readonly creds: CredentialsStore,
   ) {}
 
   private parseProvider(raw: string): Provider {
@@ -66,17 +71,21 @@ export class IntegrationsService {
       update: {},
       create: { id: workspaceId, name: 'Northwind Goods' },
     });
-    // Save submitted store credentials (encrypted) before syncing, so this workspace points at it.
+    // Save submitted credentials (encrypted) before syncing.
     if (provider === Provider.WOOCOMMERCE && creds?.storeUrl && creds.consumerKey && creds.consumerSecret) {
       await this.wooCreds.save(workspaceId, {
         storeUrl: creds.storeUrl,
         consumerKey: creds.consumerKey,
         consumerSecret: creds.consumerSecret,
       });
+    } else if (provider === Provider.KLAVIYO && creds?.apiKey) {
+      await this.creds.save(workspaceId, provider, { apiKey: creds.apiKey });
     }
     await this.upsertStatus(provider, IntegrationStatus.SYNCING, undefined, workspaceId);
     try {
-      const result = await this.ingestion.ingest(provider, workspaceId);
+      const result = this.ingestion.supportsMarketing(provider)
+        ? await this.ingestion.ingestMarketing(provider, workspaceId)
+        : await this.ingestion.ingest(provider, workspaceId);
       await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
       return { ...result, status: 'connected' };
     } catch (err) {
@@ -88,7 +97,9 @@ export class IntegrationsService {
   async sync(rawProvider: string, workspaceId: string = WORKSPACE_ID) {
     const provider = this.parseProvider(rawProvider);
     try {
-      const result = await this.ingestion.ingest(provider, workspaceId);
+      const result = this.ingestion.supportsMarketing(provider)
+        ? await this.ingestion.ingestMarketing(provider, workspaceId)
+        : await this.ingestion.ingest(provider, workspaceId);
       await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
       return { ...result, status: 'synced' };
     } catch (err) {

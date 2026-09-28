@@ -89,6 +89,12 @@ export type Integration = {
 };
 
 export type WooCreds = { storeUrl: string; consumerKey: string; consumerSecret: string };
+export type ConnectCreds = WooCreds | { apiKey: string };
+
+export type MarketingKpi = { key: string; label: string; value: string; delta: string; kind: string };
+export type MarketingChannel = { name: string; spend: string; rev: string; roas: string; cpa: string; ctr: string; conv: number; kind: string; rec: string };
+export type Marketing = { source: string; kpis: MarketingKpi[]; channels: MarketingChannel[] };
+export const fetchMarketing = () => getJson<Marketing>("/dashboard/marketing");
 
 export const fetchIntegrations = () =>
   getJson<{ integrations: Integration[] }>("/integrations").then((r) => r?.integrations ?? null);
@@ -107,9 +113,9 @@ async function postJson<T>(path: string, body?: unknown): Promise<T | null> {
   }
 }
 
-// Connect a provider. For WooCommerce, pass the store's credentials to save + sync it.
-export const connectIntegration = (provider: string, creds?: WooCreds) =>
-  postJson<{ status: string; error?: string; products?: number }>(
+// Connect a provider. Pass credentials to save + sync it (WooCommerce store keys, or a Klaviyo API key).
+export const connectIntegration = (provider: string, creds?: ConnectCreds) =>
+  postJson<{ status: string; error?: string; products?: number; channels?: number }>(
     `/integrations/${provider.toLowerCase()}/connect`,
     creds,
   );

@@ -27,4 +27,9 @@ export class DashboardController {
   getProducts(@Workspace() workspaceId: string) {
     return this.dashboard.getProducts(workspaceId);
   }
+
+  @Get('marketing')
+  getMarketing(@Workspace() workspaceId: string) {
+    return this.dashboard.getMarketing(workspaceId);
+  }
 }

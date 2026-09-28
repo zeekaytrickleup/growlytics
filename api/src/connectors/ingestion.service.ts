@@ -4,8 +4,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InsightsService } from '../insights/insights.service';
 import { ShopifyConnector } from './shopify.connector';
 import { WooCommerceConnector } from './woocommerce.connector';
+import { KlaviyoConnector } from './klaviyo.connector';
 import { Connector, ConnectorConfig } from './connector.interface';
+import { MarketingConnector } from './marketing.interface';
 import { WooCredentialsService } from './woo-credentials.service';
+import { CredentialsStore } from './credentials.store';
 
 const WORKSPACE_ID = 'demo-workspace';
 
@@ -18,15 +21,19 @@ const WORKSPACE_ID = 'demo-workspace';
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
   private readonly connectors: Partial<Record<Provider, Connector>>;
+  private readonly marketingConnectors: Partial<Record<Provider, MarketingConnector>>;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly insights: InsightsService,
     private readonly wooCreds: WooCredentialsService,
+    private readonly creds: CredentialsStore,
     shopify: ShopifyConnector,
     woocommerce: WooCommerceConnector,
+    klaviyo: KlaviyoConnector,
   ) {
     this.connectors = { [Provider.SHOPIFY]: shopify, [Provider.WOOCOMMERCE]: woocommerce };
+    this.marketingConnectors = { [Provider.KLAVIYO]: klaviyo };
   }
 
   /** Per-workspace config for a connector (e.g. the WooCommerce store's saved credentials). */
@@ -39,7 +46,42 @@ export class IngestionService {
   }
 
   supports(provider: Provider): boolean {
-    return provider in this.connectors;
+    return provider in this.connectors || provider in this.marketingConnectors;
+  }
+
+  supportsMarketing(provider: Provider): boolean {
+    return provider in this.marketingConnectors;
+  }
+
+  /** Sync a marketing provider (e.g. Klaviyo) into channel MetricSnapshots. */
+  async ingestMarketing(provider: Provider, workspaceId: string = WORKSPACE_ID) {
+    await this.prisma.workspace.upsert({
+      where: { id: workspaceId },
+      update: {},
+      create: { id: workspaceId, name: 'Northwind Goods' },
+    });
+    const connector = this.marketingConnectors[provider];
+    if (!connector) return { provider, ingested: false };
+
+    const creds = (await this.creds.resolve(workspaceId, provider)) ?? {};
+    const data = await connector.syncMarketing(creds);
+
+    // Replace this provider's channel metrics.
+    await this.prisma.metricSnapshot.deleteMany({
+      where: { workspaceId, source: provider, metric: { in: ['mkt_spend', 'mkt_rev', 'mkt_conv', 'mkt_clicks', 'mkt_impr', 'mkt_rec'] } },
+    });
+    const now = new Date();
+    const rows = data.channels.flatMap((c) => [
+      { workspaceId, source: provider, metric: 'mkt_spend', dimension: c.name, value: c.spend, ts: now },
+      { workspaceId, source: provider, metric: 'mkt_rev', dimension: c.name, value: c.revenue, ts: now },
+      { workspaceId, source: provider, metric: 'mkt_conv', dimension: c.name, value: c.conversions, ts: now },
+      { workspaceId, source: provider, metric: 'mkt_clicks', dimension: c.name, value: c.clicks, ts: now },
+      { workspaceId, source: provider, metric: 'mkt_impr', dimension: c.name, value: c.impressions, ts: now },
+    ]);
+    await this.prisma.metricSnapshot.createMany({ data: rows });
+
+    this.logger.log(`Ingested marketing ${provider}: ${data.channels.length} channel(s).`);
+    return { provider, ingested: true, channels: data.channels.length };
   }
 
   /** Sync one provider into the normalized tables. Returns a summary of what was ingested. */

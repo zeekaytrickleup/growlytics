@@ -263,6 +263,77 @@ export class DashboardService {
     return { source: 'mock', products: this.getMockOverview().topProducts };
   }
 
+  /** Marketing-channel performance for the Marketing tab (live from mkt_* metrics, else mock). */
+  async getMarketing(workspaceId: string = WORKSPACE_ID) {
+    try {
+      const metrics = await this.prisma.metricSnapshot.findMany({
+        where: { workspaceId, metric: { in: ['mkt_spend', 'mkt_rev', 'mkt_conv', 'mkt_clicks', 'mkt_impr'] } },
+      });
+      if (metrics.length) {
+        // Group by channel (dimension).
+        const byChannel = new Map<string, { spend: number; rev: number; conv: number; clicks: number; impr: number }>();
+        const field: Record<string, keyof NonNullable<ReturnType<typeof byChannel.get>>> = {
+          mkt_spend: 'spend', mkt_rev: 'rev', mkt_conv: 'conv', mkt_clicks: 'clicks', mkt_impr: 'impr',
+        };
+        for (const m of metrics) {
+          const ch = m.dimension ?? 'Other';
+          const row = byChannel.get(ch) ?? { spend: 0, rev: 0, conv: 0, clicks: 0, impr: 0 };
+          const key = field[m.metric];
+          if (key) row[key] = m.value;
+          byChannel.set(ch, row);
+        }
+        const money = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`);
+        const channels = Array.from(byChannel.entries())
+          .map(([name, r]) => ({
+            name,
+            spend: money(r.spend),
+            rev: money(r.rev),
+            roas: r.spend ? `${(r.rev / r.spend).toFixed(1)}x` : '∞',
+            cpa: r.conv ? `$${(r.spend / r.conv).toFixed(0)}` : '$0',
+            ctr: r.impr ? `${((r.clicks / r.impr) * 100).toFixed(1)}%` : '0%',
+            conv: Math.round(r.conv),
+            kind: 'up',
+            rec: 'Scale flows',
+            _rev: r.rev, _spend: r.spend, _conv: r.conv,
+          }))
+          .sort((a, b) => b._rev - a._rev);
+
+        const totalSpend = channels.reduce((s, c) => s + c._spend, 0);
+        const totalRev = channels.reduce((s, c) => s + c._rev, 0);
+        const totalConv = channels.reduce((s, c) => s + c._conv, 0);
+        const kpis = [
+          { key: 'spend', label: 'Total Spend', value: money(totalSpend), delta: '0%', kind: 'up' },
+          { key: 'attrRev', label: 'Attributed Revenue', value: money(totalRev), delta: '0%', kind: 'up' },
+          { key: 'roas', label: 'Blended ROAS', value: totalSpend ? `${(totalRev / totalSpend).toFixed(1)}x` : '∞', delta: '0%', kind: 'up' },
+          { key: 'conv', label: 'Conversions', value: Math.round(totalConv).toLocaleString('en-US'), delta: '0%', kind: 'up' },
+        ];
+        return { source: 'live', kpis, channels: channels.map(({ _rev, _spend, _conv, ...c }) => c) };
+      }
+    } catch (err) {
+      this.logger.warn(`Marketing fell back to mock: ${(err as Error).message}`);
+    }
+    return this.getMockMarketing();
+  }
+
+  private getMockMarketing() {
+    return {
+      source: 'mock',
+      kpis: [
+        { key: 'spend', label: 'Total Spend', value: '$19.8k', delta: '4%', kind: 'up' },
+        { key: 'attrRev', label: 'Attributed Revenue', value: '$91.8k', delta: '16%', kind: 'up' },
+        { key: 'roas', label: 'Blended ROAS', value: '4.6x', delta: '8%', kind: 'up' },
+        { key: 'conv', label: 'Conversions', value: '1,204', delta: '11%', kind: 'up' },
+      ],
+      channels: [
+        { name: 'Google Ads', spend: '$8.2k', rev: '$34.1k', roas: '4.2x', cpa: '$12', ctr: '3.1%', conv: 812, kind: 'up', rec: 'Scale Shopping' },
+        { name: 'Meta Ads', spend: '$6.9k', rev: '$19.8k', roas: '2.9x', cpa: '$18', ctr: '1.8%', conv: 540, kind: 'down', rec: 'Refresh creative' },
+        { name: 'TikTok Ads', spend: '$3.1k', rev: '$11.4k', roas: '3.7x', cpa: '$14', ctr: '2.4%', conv: 288, kind: 'up', rec: 'Test UGC' },
+        { name: 'Pinterest', spend: '$1.2k', rev: '$3.9k', roas: '3.3x', cpa: '$16', ctr: '1.5%', conv: 96, kind: 'up', rec: 'Hold' },
+        { name: 'Email', spend: '$0.4k', rev: '$22.6k', roas: '56x', cpa: '$1', ctr: '6.2%', conv: 1120, kind: 'up', rec: 'Add flow' },
+      ],
+    };
+  }
+
   private getMockOverview() {
     return {
       source: 'mock',
