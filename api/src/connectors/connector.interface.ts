@@ -29,9 +29,12 @@ export interface SyncResult {
  * A data-source connector. Real connectors (Shopify, GA4, Meta …) fetch via OAuth and map the
  * vendor payload into the normalized shapes above; the ingestion layer persists them uniformly.
  */
+/** Optional per-workspace connector config (e.g. a store's URL + API keys). */
+export type ConnectorConfig = Record<string, string>;
+
 export interface Connector {
   provider: Provider;
   label: string;
-  /** Fetch + normalize the latest data for a workspace. */
-  sync(): Promise<SyncResult>;
+  /** Fetch + normalize the latest data for a workspace, using the given per-workspace config if any. */
+  sync(config?: ConnectorConfig): Promise<SyncResult>;
 }

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const DEMO_USER_EMAIL = 'demo@growlytics.ai';
@@ -40,5 +41,20 @@ export class AuthService {
       currentWorkspaceId,
       workspaces: [{ id: 'demo-workspace', name: 'Northwind Goods', role: 'OWNER' }],
     };
+  }
+
+  /** Create a new workspace (one per store) and make the current demo user its owner. */
+  async createWorkspace(name: string) {
+    const clean = (name || '').trim() || 'New Store';
+    const user = await this.prisma.user.upsert({
+      where: { email: DEMO_USER_EMAIL },
+      update: {},
+      create: { email: DEMO_USER_EMAIL, name: 'Demo User' },
+    });
+    const ws = await this.prisma.workspace.create({ data: { name: clean } });
+    await this.prisma.membership.create({
+      data: { userId: user.id, workspaceId: ws.id, role: Role.OWNER },
+    });
+    return { id: ws.id, name: ws.name, role: Role.OWNER };
   }
 }

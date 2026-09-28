@@ -1,5 +1,6 @@
-import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { IntegrationsService } from './integrations.service';
+import type { ConnectCredentials } from './integrations.service';
 import { Workspace } from '../auth/workspace.decorator';
 
 @Controller('integrations')
@@ -12,8 +13,12 @@ export class IntegrationsController {
   }
 
   @Post(':provider/connect')
-  connect(@Param('provider') provider: string, @Workspace() workspaceId: string) {
-    return this.integrations.connect(provider, workspaceId);
+  connect(
+    @Param('provider') provider: string,
+    @Workspace() workspaceId: string,
+    @Body() creds?: ConnectCredentials,
+  ) {
+    return this.integrations.connect(provider, workspaceId, creds);
   }
 
   @Post(':provider/sync')

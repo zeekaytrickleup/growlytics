@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
-  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace,
-  type Overview, type Integration, type ReportSummary, type Me,
+  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace,
+  type Overview, type Integration, type ReportSummary, type Me, type WooCreds,
 } from "../lib/api";
 
 /* ============================================================
@@ -186,6 +186,17 @@ const STYLES = `
 .btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); border-color: transparent; box-shadow: 0 8px 22px -8px rgba(124,124,240,0.8); }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.ghost { background: transparent; border-color: var(--border); color: var(--dim); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* modal + form fields (connect a store) */
+.modal-card { width: min(460px, 92vw); background: var(--surface); border: 1px solid var(--border-2); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.modal-head { padding: 18px 20px 4px; }
+.modal-body { padding: 8px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+.field label { display: block; font-size: 11.5px; color: var(--dim); font-weight: 600; margin-bottom: 5px; }
+.field input { width: 100%; box-sizing: border-box; font-size: 13px; font-family: inherit; padding: 9px 11px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); outline: none; }
+.field input:focus { border-color: rgba(124,124,240,0.5); }
+.field .hint { font-size: 10.5px; color: var(--mute); margin-top: 4px; }
+.form-err { font-size: 12px; color: var(--red); background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.25); padding: 8px 11px; border-radius: 9px; }
 
 .chip { font-size: 12px; padding: 7px 13px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--dim); cursor: pointer; transition: all .16s; }
 .chip:hover { color: var(--text); }
@@ -992,15 +1003,118 @@ const FALLBACK_INTEGRATIONS: Integration[] = [
   { provider: "KLAVIYO", name: "Klaviyo", desc: "Email · flows", status: "AVAILABLE", lastSyncedAt: null, hasDataConnector: false },
 ];
 
+/**
+ * Modal for connecting a WooCommerce store. In "add" mode it first creates a new workspace
+ * (one workspace per store), then saves + syncs the store's credentials into it.
+ * onDone(newWorkspaceId?) fires on success — the caller refreshes and switches to it.
+ */
+function StoreConnectModal({
+  mode, initialName, initialUrl, onClose, onDone,
+}: {
+  mode: "add" | "current";
+  initialName?: string;
+  initialUrl?: string;
+  onClose: () => void;
+  onDone: (newWorkspaceId?: string) => void;
+}) {
+  const [name, setName] = useState(initialName ?? "");
+  const [storeUrl, setStoreUrl] = useState(initialUrl ?? "");
+  const [consumerKey, setConsumerKey] = useState("");
+  const [consumerSecret, setConsumerSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    if (mode === "add" && !name.trim()) return setErr("Give this store a name.");
+    if (!storeUrl.trim() || !consumerKey.trim() || !consumerSecret.trim()) return setErr("Fill in the store URL and both API keys.");
+    setBusy(true); setErr("");
+    const prevWs = getWorkspace();
+    let newWs: string | undefined;
+    try {
+      if (mode === "add") {
+        const ws = await createWorkspace(name.trim());
+        if (!ws) { setErr("Could not create the workspace. Try again."); setBusy(false); return; }
+        newWs = ws.id;
+        setWorkspace(ws.id); // scope the connect call to the new workspace
+      }
+      const creds: WooCreds = { storeUrl: storeUrl.trim(), consumerKey: consumerKey.trim(), consumerSecret: consumerSecret.trim() };
+      const res = await connectIntegration("woocommerce", creds);
+      if (!res || res.status === "error") {
+        if (mode === "add") setWorkspace(prevWs); // roll back active workspace; the (empty) ws can be reused on retry
+        setErr(res?.error ? `Couldn't reach the store: ${res.error}` : "Couldn't connect. Check the URL and keys are correct.");
+        setBusy(false);
+        return;
+      }
+      onDone(newWs);
+    } catch {
+      if (mode === "add") setWorkspace(prevWs);
+      setErr("Something went wrong. Please try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="cmd-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--surface-2)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--primary-2)" }}><Globe size={17} /></div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>{mode === "add" ? "Add a WooCommerce store" : "Connect WooCommerce store"}</div>
+              <div style={{ fontSize: 11.5, color: "var(--mute)" }}>Paste your store address and REST API keys</div>
+            </div>
+          </div>
+        </div>
+        <div className="modal-body">
+          {mode === "add" && (
+            <div className="field">
+              <label>Store name</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My Second Shop" autoFocus />
+            </div>
+          )}
+          <div className="field">
+            <label>Store URL</label>
+            <input value={storeUrl} onChange={e => setStoreUrl(e.target.value)} placeholder="https://yourstore.com" autoFocus={mode === "current"} />
+          </div>
+          <div className="field">
+            <label>Consumer key</label>
+            <input value={consumerKey} onChange={e => setConsumerKey(e.target.value)} placeholder="ck_xxxxxxxxxxxxxxxx" />
+          </div>
+          <div className="field">
+            <label>Consumer secret</label>
+            <input type="password" value={consumerSecret} onChange={e => setConsumerSecret(e.target.value)} placeholder="cs_xxxxxxxxxxxxxxxx" />
+            <div className="hint">WooCommerce → Settings → Advanced → REST API → Add key (Read access is enough). Keys are encrypted before storage.</div>
+          </div>
+          {err && <div className="form-err">{err}</div>}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button className="btn ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn primary" style={{ flex: 1, justifyContent: "center" }} onClick={submit} disabled={busy}>
+              {busy ? <><RefreshCw size={14} style={{ animation: "spin 1.4s linear infinite" }} /> Connecting…</> : (mode === "add" ? "Create & connect" : "Connect store")}
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
 function Integrations() {
   const [items, setItems] = useState<Integration[]>(FALLBACK_INTEGRATIONS);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [wooModal, setWooModal] = useState<{ url?: string } | null>(null);
 
   const load = () => fetchIntegrations().then(list => { if (list) { setItems(list); setLive(true); } });
   useEffect(() => { load(); }, []);
 
   const act = async (provider: string, kind: "connect" | "sync") => {
+    // WooCommerce needs a store URL + keys — open the credentials form instead of a blind connect.
+    if (provider === "WOOCOMMERCE" && kind === "connect") {
+      const existing = items.find(i => i.provider === "WOOCOMMERCE")?.storeUrl ?? undefined;
+      setWooModal({ url: existing });
+      return;
+    }
     setBusy(provider);
     setItems(prev => prev.map(i => i.provider === provider ? { ...i, status: "SYNCING" } : i));
     await (kind === "connect" ? connectIntegration(provider) : syncIntegration(provider));
@@ -1023,13 +1137,20 @@ function Integrations() {
               <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color }}><Globe size={20} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 650 }}>{it.name}</div>
-                <div style={{ fontSize: 11.5, color: "var(--mute)" }}>
-                  {it.status === "CONNECTED" ? (it.hasDataConnector ? "Connected · syncing data" : "Connected") : it.desc}
+                <div style={{ fontSize: 11.5, color: "var(--mute)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {it.status === "CONNECTED"
+                    ? (it.storeUrl ? it.storeUrl.replace(/^https?:\/\//, "") : it.hasDataConnector ? "Connected · syncing data" : "Connected")
+                    : it.desc}
                 </div>
               </div>
               {isBusy && <RefreshCw size={15} style={{ color: "var(--amber)", animation: "spin 1.4s linear infinite" }} />}
               {!isBusy && it.status === "CONNECTED" && (
-                <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => act(it.provider, "sync")}>Sync</button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {it.provider === "WOOCOMMERCE" && (
+                    <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => act(it.provider, "connect")}>Change</button>
+                  )}
+                  <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => act(it.provider, "sync")}>Sync</button>
+                </div>
               )}
               {!isBusy && it.status === "AVAILABLE" && (
                 <button className="btn" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => act(it.provider, "connect")}>Connect</button>
@@ -1041,6 +1162,14 @@ function Integrations() {
           );
         })}
       </div>
+      {wooModal && (
+        <StoreConnectModal
+          mode="current"
+          initialUrl={wooModal.url}
+          onClose={() => setWooModal(null)}
+          onDone={async () => { setWooModal(null); setBusy("WOOCOMMERCE"); await load(); setBusy(null); }}
+        />
+      )}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -1266,6 +1395,7 @@ export default function GrowthOS() {
   const [me, setMe] = useState<Me | null>(null);
   const [wsId, setWsId] = useState("demo-workspace");
   const [wsOpen, setWsOpen] = useState(false);
+  const [addStore, setAddStore] = useState(false);
 
   useEffect(() => {
     setToday(new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }));
@@ -1379,6 +1509,9 @@ export default function GrowthOS() {
                           <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--mute)" }}>{w.role}</span>
                         </div>
                       ))}
+                      <div onClick={() => { setWsOpen(false); setAddStore(true); }} style={{ padding: "10px 12px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, color: "var(--primary-2)", fontWeight: 600, borderTop: "1px solid var(--border)" }}>
+                        <Plus size={14} /> Add a store
+                      </div>
                     </div>
                   </>
                 )}
@@ -1393,6 +1526,19 @@ export default function GrowthOS() {
 
       <button className="fab" onClick={() => go("assistant")} title="Ask Growth Assistant"><Sparkles size={24} color="#fff" /></button>
       <CommandBar open={cmd} setOpen={setCmd} go={go} />
+      {addStore && (
+        <StoreConnectModal
+          mode="add"
+          onClose={() => setAddStore(false)}
+          onDone={async (newWsId) => {
+            setAddStore(false);
+            const m = await fetchMe();
+            if (m) setMe(m);
+            if (newWsId) { setWorkspace(newWsId); setWsId(newWsId); }
+            go("dashboard"); // land on the new store's dashboard
+          }}
+        />
+      )}
     </div>
   );
 }

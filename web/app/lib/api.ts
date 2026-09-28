@@ -85,14 +85,21 @@ export type Integration = {
   status: "CONNECTED" | "SYNCING" | "ERROR" | "AVAILABLE";
   lastSyncedAt: string | null;
   hasDataConnector: boolean;
+  storeUrl?: string | null;
 };
+
+export type WooCreds = { storeUrl: string; consumerKey: string; consumerSecret: string };
 
 export const fetchIntegrations = () =>
   getJson<{ integrations: Integration[] }>("/integrations").then((r) => r?.integrations ?? null);
 
-async function postJson<T>(path: string): Promise<T | null> {
+async function postJson<T>(path: string, body?: unknown): Promise<T | null> {
   try {
-    const res = await fetch(`${API_URL}${path}`, { method: "POST", headers: wsHeaders() });
+    const res = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...wsHeaders() },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -100,10 +107,18 @@ async function postJson<T>(path: string): Promise<T | null> {
   }
 }
 
-export const connectIntegration = (provider: string) =>
-  postJson<{ status: string }>(`/integrations/${provider.toLowerCase()}/connect`);
+// Connect a provider. For WooCommerce, pass the store's credentials to save + sync it.
+export const connectIntegration = (provider: string, creds?: WooCreds) =>
+  postJson<{ status: string; error?: string; products?: number }>(
+    `/integrations/${provider.toLowerCase()}/connect`,
+    creds,
+  );
 export const syncIntegration = (provider: string) =>
   postJson<{ status: string }>(`/integrations/${provider.toLowerCase()}/sync`);
+
+// Create a new workspace (one per store). Returns the new workspace.
+export const createWorkspace = (name: string) =>
+  postJson<{ id: string; name: string; role: string }>("/workspaces", { name });
 
 export async function askAssistant(question: string): Promise<AIAnswer | null> {
   try {

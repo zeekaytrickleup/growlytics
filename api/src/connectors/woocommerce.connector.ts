@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Provider } from '@prisma/client';
-import { Connector, SyncResult, NormalizedProduct, NormalizedKpi } from './connector.interface';
+import { Connector, ConnectorConfig, SyncResult, NormalizedProduct, NormalizedKpi } from './connector.interface';
+import { WooCreds } from './woo-credentials.service';
 
 type WooOrder = { total: string; status: string; date_created_gmt?: string; date_created?: string };
 type WooProduct = {
@@ -18,9 +19,9 @@ const DAY = 86_400_000;
 
 /**
  * WooCommerce connector — pulls live products + orders via the WooCommerce REST API and maps them
- * into the normalized shapes. Reads credentials from env (set on the host, never in code):
- *   WOO_STORE_URL, WOO_CONSUMER_KEY, WOO_CONSUMER_SECRET
- * The store must be reachable over public HTTPS.
+ * into the normalized shapes. Credentials are passed in per-workspace (a store saved from the
+ * dashboard, or the WOO_* env fallback — see WooCredentialsService), so each workspace can point at
+ * a different store. The store must be reachable over public HTTPS.
  */
 @Injectable()
 export class WooCommerceConnector implements Connector {
@@ -28,18 +29,21 @@ export class WooCommerceConnector implements Connector {
   readonly label = 'WooCommerce';
   private readonly logger = new Logger(WooCommerceConnector.name);
 
-  get configured(): boolean {
-    return !!(process.env.WOO_STORE_URL && process.env.WOO_CONSUMER_KEY && process.env.WOO_CONSUMER_SECRET);
+  /** Coerce a generic ConnectorConfig into WooCreds, or throw a clear error. */
+  private credsFrom(config?: ConnectorConfig): WooCreds {
+    const storeUrl = (config?.storeUrl || '').trim().replace(/\/+$/, '');
+    const consumerKey = (config?.consumerKey || '').trim();
+    const consumerSecret = (config?.consumerSecret || '').trim();
+    if (!storeUrl || !consumerKey || !consumerSecret) {
+      throw new Error('WooCommerce not configured — connect a store (URL + consumer key + secret).');
+    }
+    return { storeUrl, consumerKey, consumerSecret };
   }
 
-  private base(): string {
-    return (process.env.WOO_STORE_URL || '').trim().replace(/\/+$/, '');
-  }
-
-  private async get(path: string, params: Record<string, string | number>): Promise<unknown[]> {
-    const url = new URL(`${this.base()}/wp-json/wc/v3/${path}`);
-    url.searchParams.set('consumer_key', process.env.WOO_CONSUMER_KEY || '');
-    url.searchParams.set('consumer_secret', process.env.WOO_CONSUMER_SECRET || '');
+  private async get(creds: WooCreds, path: string, params: Record<string, string | number>): Promise<unknown[]> {
+    const url = new URL(`${creds.storeUrl}/wp-json/wc/v3/${path}`);
+    url.searchParams.set('consumer_key', creds.consumerKey);
+    url.searchParams.set('consumer_secret', creds.consumerSecret);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
     if (!res.ok) {
@@ -49,10 +53,10 @@ export class WooCommerceConnector implements Connector {
     return (await res.json()) as unknown[];
   }
 
-  private async fetchAll(path: string, params: Record<string, string | number>, maxPages = 5): Promise<unknown[]> {
+  private async fetchAll(creds: WooCreds, path: string, params: Record<string, string | number>, maxPages = 5): Promise<unknown[]> {
     const all: unknown[] = [];
     for (let page = 1; page <= maxPages; page++) {
-      const rows = await this.get(path, { ...params, per_page: 100, page });
+      const rows = await this.get(creds, path, { ...params, per_page: 100, page });
       all.push(...rows);
       if (rows.length < 100) break;
     }
@@ -60,8 +64,9 @@ export class WooCommerceConnector implements Connector {
   }
 
   /** Compute customer segments from actual orders (grouped by buyer email — captures guests too). */
-  async customerSegments() {
-    const orders = (await this.fetchAll('orders', { status: 'any', orderby: 'date', order: 'desc' })) as {
+  async customerSegments(config?: ConnectorConfig) {
+    const creds = this.credsFrom(config);
+    const orders = (await this.fetchAll(creds, 'orders', { status: 'any', orderby: 'date', order: 'desc' })) as {
       status: string;
       total: string;
       billing?: { email?: string };
@@ -106,16 +111,14 @@ export class WooCommerceConnector implements Connector {
     }));
   }
 
-  async sync(): Promise<SyncResult> {
-    if (!this.configured) {
-      throw new Error('WooCommerce not configured — set WOO_STORE_URL, WOO_CONSUMER_KEY, WOO_CONSUMER_SECRET.');
-    }
+  async sync(config?: ConnectorConfig): Promise<SyncResult> {
+    const creds = this.credsFrom(config);
     const now = Date.now();
     const after = new Date(now - 180 * DAY).toISOString(); // 180d history for period filtering
 
     const [ordersRaw, productsRaw] = await Promise.all([
-      this.fetchAll('orders', { after, status: 'any', orderby: 'date', order: 'desc' }) as Promise<WooOrder[]>,
-      this.fetchAll('products', { status: 'publish', orderby: 'popularity' }) as Promise<WooProduct[]>,
+      this.fetchAll(creds, 'orders', { after, status: 'any', orderby: 'date', order: 'desc' }) as Promise<WooOrder[]>,
+      this.fetchAll(creds, 'products', { status: 'publish', orderby: 'popularity' }) as Promise<WooProduct[]>,
     ]);
 
     // Paid orders only, parsed to { total, timestamp, day }.

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { WooCommerceConnector } from '../connectors/woocommerce.connector';
+import { WooCredentialsService } from '../connectors/woo-credentials.service';
 
 const MOCK_SEGMENTS = [
   { name: 'VIP', n: 214, val: '$182k', color: 'var(--amber)', ai: 'Offer early access' },
@@ -12,12 +13,16 @@ const MOCK_SEGMENTS = [
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly woo: WooCommerceConnector) {}
+  constructor(
+    private readonly woo: WooCommerceConnector,
+    private readonly wooCreds: WooCredentialsService,
+  ) {}
 
-  async segments() {
-    if (this.woo.configured) {
+  async segments(workspaceId: string) {
+    const creds = await this.wooCreds.resolve(workspaceId);
+    if (creds) {
       try {
-        return { source: 'live', segments: await this.woo.customerSegments() };
+        return { source: 'live', segments: await this.woo.customerSegments({ ...creds }) };
       } catch {
         /* fall back to mock on API error */
       }

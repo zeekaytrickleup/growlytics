@@ -4,7 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InsightsService } from '../insights/insights.service';
 import { ShopifyConnector } from './shopify.connector';
 import { WooCommerceConnector } from './woocommerce.connector';
-import { Connector } from './connector.interface';
+import { Connector, ConnectorConfig } from './connector.interface';
+import { WooCredentialsService } from './woo-credentials.service';
 
 const WORKSPACE_ID = 'demo-workspace';
 
@@ -21,10 +22,20 @@ export class IngestionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly insights: InsightsService,
+    private readonly wooCreds: WooCredentialsService,
     shopify: ShopifyConnector,
     woocommerce: WooCommerceConnector,
   ) {
     this.connectors = { [Provider.SHOPIFY]: shopify, [Provider.WOOCOMMERCE]: woocommerce };
+  }
+
+  /** Per-workspace config for a connector (e.g. the WooCommerce store's saved credentials). */
+  private async configFor(provider: Provider, workspaceId: string): Promise<ConnectorConfig | undefined> {
+    if (provider === Provider.WOOCOMMERCE) {
+      const creds = await this.wooCreds.resolve(workspaceId);
+      return creds ? { ...creds } : undefined;
+    }
+    return undefined;
   }
 
   supports(provider: Provider): boolean {
@@ -45,7 +56,8 @@ export class IngestionService {
       return { provider, ingested: false };
     }
 
-    const data = await connector.sync();
+    const config = await this.configFor(provider, workspaceId);
+    const data = await connector.sync(config);
 
     // The connected store is authoritative — replace the workspace's products and its
     // KPI/revenue metrics from any prior source (so real store data isn't mixed with the seed).

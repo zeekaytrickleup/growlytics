@@ -2,6 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { IntegrationStatus, Provider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IngestionService } from '../connectors/ingestion.service';
+import { WooCredentialsService } from '../connectors/woo-credentials.service';
+
+/** Credentials a user can submit when connecting a WooCommerce store from the dashboard. */
+export type ConnectCredentials = { storeUrl?: string; consumerKey?: string; consumerSecret?: string };
 
 const WORKSPACE_ID = 'demo-workspace';
 
@@ -22,6 +26,7 @@ export class IntegrationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ingestion: IngestionService,
+    private readonly wooCreds: WooCredentialsService,
   ) {}
 
   private parseProvider(raw: string): Provider {
@@ -31,7 +36,7 @@ export class IntegrationsService {
   }
 
   async list(workspaceId: string = WORKSPACE_ID) {
-    let rows: { provider: Provider; status: IntegrationStatus; lastSyncedAt: Date | null }[] = [];
+    let rows: { provider: Provider; status: IntegrationStatus; lastSyncedAt: Date | null; meta: unknown }[] = [];
     try {
       rows = await this.prisma.integration.findMany({ where: { workspaceId } });
     } catch {
@@ -40,6 +45,7 @@ export class IntegrationsService {
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
     const items = CATALOG.map((c) => {
       const row = byProvider.get(c.provider);
+      const meta = (row?.meta ?? {}) as { storeUrl?: string };
       return {
         provider: c.provider,
         name: c.name,
@@ -47,18 +53,27 @@ export class IntegrationsService {
         status: row?.status ?? IntegrationStatus.AVAILABLE,
         lastSyncedAt: row?.lastSyncedAt ?? null,
         hasDataConnector: this.ingestion.supports(c.provider),
+        storeUrl: meta.storeUrl ?? null, // for WooCommerce: which store this workspace points at
       };
     });
     return { integrations: items };
   }
 
-  async connect(rawProvider: string, workspaceId: string = WORKSPACE_ID) {
+  async connect(rawProvider: string, workspaceId: string = WORKSPACE_ID, creds?: ConnectCredentials) {
     const provider = this.parseProvider(rawProvider);
     await this.prisma.workspace.upsert({
       where: { id: workspaceId },
       update: {},
       create: { id: workspaceId, name: 'Northwind Goods' },
     });
+    // Save submitted store credentials (encrypted) before syncing, so this workspace points at it.
+    if (provider === Provider.WOOCOMMERCE && creds?.storeUrl && creds.consumerKey && creds.consumerSecret) {
+      await this.wooCreds.save(workspaceId, {
+        storeUrl: creds.storeUrl,
+        consumerKey: creds.consumerKey,
+        consumerSecret: creds.consumerSecret,
+      });
+    }
     await this.upsertStatus(provider, IntegrationStatus.SYNCING, undefined, workspaceId);
     try {
       const result = await this.ingestion.ingest(provider, workspaceId);
