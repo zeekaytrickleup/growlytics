@@ -89,12 +89,20 @@ export type Integration = {
 };
 
 export type WooCreds = { storeUrl: string; consumerKey: string; consumerSecret: string };
-export type ConnectCreds = WooCreds | { apiKey: string };
+export type ConnectCreds =
+  | WooCreds
+  | { apiKey: string }
+  | { serviceAccountJson: string; siteUrl: string };
 
 export type MarketingKpi = { key: string; label: string; value: string; delta: string; kind: string };
 export type MarketingChannel = { name: string; spend: string; rev: string; roas: string; cpa: string; ctr: string; conv: number; kind: string; rec: string };
 export type Marketing = { source: string; kpis: MarketingKpi[]; channels: MarketingChannel[] };
 export const fetchMarketing = () => getJson<Marketing>("/dashboard/marketing");
+
+export type SeoKpi = { key: string; label: string; value: string; delta: string; kind: string };
+export type SeoKeyword = { query: string; clicks: number; ctr: number; position: number };
+export type Seo = { source: string; kpis: SeoKpi[]; chart: { d: string; v: number }[]; keywords: SeoKeyword[] };
+export const fetchSeo = () => getJson<Seo>("/dashboard/seo");
 
 export const fetchIntegrations = () =>
   getJson<{ integrations: Integration[] }>("/integrations").then((r) => r?.integrations ?? null);

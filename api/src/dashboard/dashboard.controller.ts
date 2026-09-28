@@ -32,4 +32,9 @@ export class DashboardController {
   getMarketing(@Workspace() workspaceId: string) {
     return this.dashboard.getMarketing(workspaceId);
   }
+
+  @Get('seo')
+  getSeo(@Workspace() workspaceId: string) {
+    return this.dashboard.getSeo(workspaceId);
+  }
 }

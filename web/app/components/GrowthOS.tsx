@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
-  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, fetchMarketing,
-  type Overview, type Integration, type ReportSummary, type Me, type WooCreds, type Marketing,
+  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, fetchMarketing, fetchSeo,
+  type Overview, type Integration, type ReportSummary, type Me, type WooCreds, type Marketing, type Seo,
 } from "../lib/api";
 
 /* ============================================================
@@ -195,6 +195,8 @@ const STYLES = `
 .field label { display: block; font-size: 11.5px; color: var(--dim); font-weight: 600; margin-bottom: 5px; }
 .field input { width: 100%; box-sizing: border-box; font-size: 13px; font-family: inherit; padding: 9px 11px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); outline: none; }
 .field input:focus { border-color: rgba(124,124,240,0.5); }
+.field textarea { width: 100%; box-sizing: border-box; font-size: 11px; font-family: ui-monospace, monospace; padding: 9px 11px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); outline: none; resize: vertical; min-height: 84px; }
+.field textarea:focus { border-color: rgba(124,124,240,0.5); }
 .field .hint { font-size: 10.5px; color: var(--mute); margin-top: 4px; }
 .form-err { font-size: 12px; color: var(--red); background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.25); padding: 8px 11px; border-radius: 9px; }
 
@@ -952,12 +954,18 @@ function Marketing() {
 
 /* ---------------- generic metric screens ---------------- */
 type KpiDef = { icon: React.ElementType; label: string; value: string; delta: string; kind: string; color: string };
-function MetricScreen({ title, sub, kpis, tableHead, rows, chart, aiNote }: {
+function MetricScreen({ title, sub, kpis, tableHead, rows, chart, aiNote, live }: {
   title: string; sub?: string; kpis?: KpiDef[]; tableHead?: string[];
-  rows?: React.ReactNode[][]; chart?: { k: string; v: number }[]; aiNote?: string;
+  rows?: React.ReactNode[][]; chart?: { k: string; v: number }[]; aiNote?: string; live?: boolean;
 }) {
   return (
     <div className="content fade-up">
+      {live !== undefined && (
+        <div className="section-label" style={{ marginBottom: -4 }}>
+          <SearchIcon size={15} className="accent" /> {title}
+          <span className={`badge ${live ? "up" : "neutral"}`} style={{ marginLeft: "auto" }}>{live ? "● Live data" : "○ Demo data"}</span>
+        </div>
+      )}
       {kpis && <div className="kpi-grid">{kpis.map((k, i) => <KPI key={i} {...k} />)}</div>}
       {chart && (
         <div className="card pad-lg">
@@ -994,6 +1002,54 @@ function MetricScreen({ title, sub, kpis, tableHead, rows, chart, aiNote }: {
 }
 
 const seoChart = [{ k: "W1", v: 4100 }, { k: "W2", v: 4600 }, { k: "W3", v: 5200 }, { k: "W4", v: 6100 }, { k: "W5", v: 6800 }, { k: "W6", v: 7900 }];
+
+const SEO_KPI_META: Record<string, { icon: KpiDef["icon"]; color: string }> = {
+  clicks: { icon: SearchIcon, color: "var(--emerald)" },
+  ctr: { icon: Percent, color: "var(--primary-2)" },
+  impressions: { icon: Activity, color: "var(--blue)" },
+  position: { icon: TrendingUp, color: "var(--purple)" },
+};
+
+/** SEO tab wired to Google Search Console (falls back to sample when not connected). */
+function SeoScreen() {
+  const [data, setData] = useState<Seo | null>(null);
+  useEffect(() => { fetchSeo().then(d => { if (d) setData(d); }); }, []);
+  const live = data?.source === "live";
+
+  const kpiSrc = data?.kpis ?? [
+    { key: "clicks", label: "Clicks", value: "7.9k", delta: "22%", kind: "up" },
+    { key: "ctr", label: "CTR", value: "3.8%", delta: "5%", kind: "up" },
+    { key: "impressions", label: "Impressions", value: "208k", delta: "17%", kind: "up" },
+    { key: "position", label: "Avg Position", value: "8.4", delta: "1.2", kind: "up" },
+  ];
+  const kpis: KpiDef[] = kpiSrc.map(k => {
+    const m = SEO_KPI_META[k.key] ?? { icon: SearchIcon, color: "var(--primary-2)" };
+    return { icon: m.icon, label: k.label, value: k.value, delta: k.delta, kind: k.kind, color: m.color };
+  });
+
+  const chart = (data?.chart?.length ? data.chart : null)?.map(c => ({ k: c.d, v: c.v })) ?? (live ? [] : seoChart);
+  const kw = data?.keywords ?? [
+    { query: "wireless earbuds", clicks: 1240, ctr: 4.1, position: 3.2 },
+    { query: "running hoodie", clicks: 890, ctr: 3.6, position: 5.8 },
+    { query: "smart water bottle", clicks: 610, ctr: 2.9, position: 9.1 },
+    { query: "desk lamp led", clicks: 540, ctr: 3.3, position: 6.4 },
+  ];
+  const rows = kw.map(k => [k.query, k.clicks.toLocaleString(), `${k.ctr}%`, k.position]);
+
+  return (
+    <MetricScreen
+      title="Organic Clicks" sub={live ? "Google Search Console · last ~90 days" : "Search Console · sample data — connect in Integrations"}
+      live={live}
+      kpis={kpis}
+      chart={chart.length ? chart : undefined}
+      tableHead={["Keyword", "Clicks", "CTR", "Position"]}
+      rows={rows}
+      aiNote={live
+        ? "These are your real Search Console keywords. Focus on terms ranking on page 1–2 (position 5–15) — small on-page improvements there recover the most clicks."
+        : "You rank #9 for 'smart water bottle' (lost 1 position). A comparison guide targeting this term could recover ~640 clicks/mo — competitor RivalCo added long-form content here last week."}
+    />
+  );
+}
 const fcChart = [{ k: "Jul", v: 82 }, { k: "Aug", v: 91 }, { k: "Sep", v: 104 }, { k: "Oct", v: 121 }, { k: "Nov", v: 168 }, { k: "Dec", v: 210 }];
 
 /* ---------------- Automations (workflow) ---------------- */
@@ -1182,12 +1238,68 @@ function KlaviyoConnectModal({ onClose, onDone }: { onClose: () => void; onDone:
   );
 }
 
+/** Modal for connecting Google Search Console via a service-account key + site URL. */
+function SearchConsoleConnectModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [siteUrl, setSiteUrl] = useState("");
+  const [json, setJson] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    if (!siteUrl.trim()) return setErr("Enter your Search Console property (site URL).");
+    if (!json.trim()) return setErr("Paste the service account key (the JSON file contents).");
+    try { JSON.parse(json); } catch { return setErr("The service account key isn't valid JSON — paste the whole file."); }
+    setBusy(true); setErr("");
+    const res = await connectIntegration("search_console", { serviceAccountJson: json.trim(), siteUrl: siteUrl.trim() });
+    if (!res || res.status === "error") {
+      setErr(res?.error ? `Search Console error: ${res.error}` : "Couldn't connect. Check the site URL and that the service account has access.");
+      setBusy(false);
+      return;
+    }
+    onDone();
+  };
+  return (
+    <div className="cmd-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--surface-2)", border: "1px solid var(--border)", display: "grid", placeItems: "center", color: "var(--primary-2)" }}><SearchIcon size={17} /></div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Connect Google Search Console</div>
+              <div style={{ fontSize: 11.5, color: "var(--mute)" }}>Organic clicks, impressions, CTR & top keywords</div>
+            </div>
+          </div>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <label>Search Console property (site URL)</label>
+            <input value={siteUrl} onChange={e => setSiteUrl(e.target.value)} placeholder="https://yourstore.com/  or  sc-domain:yourstore.com" autoFocus />
+          </div>
+          <div className="field">
+            <label>Service account key (JSON)</label>
+            <textarea value={json} onChange={e => setJson(e.target.value)} placeholder='{ "type": "service_account", "client_email": "...", "private_key": "..." }' />
+            <div className="hint">Google Cloud → create a service account → add its JSON key here, and add its email as a user on the Search Console property (read access). Encrypted before storage.</div>
+          </div>
+          {err && <div className="form-err">{err}</div>}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button className="btn ghost" style={{ flex: 1, justifyContent: "center" }} onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn primary" style={{ flex: 1, justifyContent: "center" }} onClick={submit} disabled={busy}>
+              {busy ? <><RefreshCw size={14} style={{ animation: "spin 1.4s linear infinite" }} /> Connecting…</> : "Connect"}
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
 function Integrations() {
   const [items, setItems] = useState<Integration[]>(FALLBACK_INTEGRATIONS);
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [wooModal, setWooModal] = useState<{ url?: string } | null>(null);
   const [klaviyoModal, setKlaviyoModal] = useState(false);
+  const [scModal, setScModal] = useState(false);
 
   const load = () => fetchIntegrations().then(list => { if (list) { setItems(list); setLive(true); } });
   useEffect(() => { load(); }, []);
@@ -1202,6 +1314,11 @@ function Integrations() {
     // Klaviyo needs a private API key.
     if (provider === "KLAVIYO" && kind === "connect") {
       setKlaviyoModal(true);
+      return;
+    }
+    // Search Console needs a service-account key + site URL.
+    if (provider === "SEARCH_CONSOLE" && kind === "connect") {
+      setScModal(true);
       return;
     }
     setBusy(provider);
@@ -1263,6 +1380,12 @@ function Integrations() {
         <KlaviyoConnectModal
           onClose={() => setKlaviyoModal(false)}
           onDone={async () => { setKlaviyoModal(false); setBusy("KLAVIYO"); await load(); setBusy(null); }}
+        />
+      )}
+      {scModal && (
+        <SearchConsoleConnectModal
+          onClose={() => setScModal(false)}
+          onDone={async () => { setScModal(false); setBusy("SEARCH_CONSOLE"); await load(); setBusy(null); }}
         />
       )}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -1527,11 +1650,7 @@ export default function GrowthOS() {
       case "reports": return <Reports />;
       case "settings": return <SettingsPage />;
       case "revenue": return <Revenue />;
-      case "seo": return <MetricScreen title="Organic Clicks" sub="Search Console · trending up"
-        kpis={[{ icon: SearchIcon, label: "Clicks", value: "7.9k", delta: "22%", kind: "up", color: "var(--emerald)" }, { icon: Percent, label: "CTR", value: "3.8%", delta: "5%", kind: "up", color: "var(--primary-2)" }, { icon: Activity, label: "Impressions", value: "208k", delta: "17%", kind: "up", color: "var(--blue)" }, { icon: TrendingUp, label: "Avg Position", value: "8.4", delta: "1.2", kind: "up", color: "var(--purple)" }]}
-        chart={seoChart} tableHead={["Keyword", "Clicks", "CTR", "Position", "Change"]}
-        rows={[["wireless earbuds", "1,240", "4.1%", "3.2", "▲ 2"], ["running hoodie", "890", "3.6%", "5.8", "▲ 4"], ["smart water bottle", "610", "2.9%", "9.1", "▼ 1"], ["desk lamp led", "540", "3.3%", "6.4", "▲ 3"]]}
-        aiNote="You rank #9 for 'smart water bottle' (lost 1 position). A comparison guide targeting this term could recover ~640 clicks/mo — competitor RivalCo added long-form content here last week." />;
+      case "seo": return <SeoScreen />;
       case "email": return <MetricScreen title="Email Revenue" sub="Klaviyo · campaigns + flows"
         kpis={[{ icon: DollarSign, label: "Email Revenue", value: "$22.6k", delta: "16%", kind: "up", color: "var(--emerald)" }, { icon: Mail, label: "Open Rate", value: "38%", delta: "3%", kind: "up", color: "var(--primary-2)" }, { icon: Target, label: "Click Rate", value: "6.2%", delta: "1%", kind: "up", color: "var(--blue)" }, { icon: TrendingDown, label: "Unsub Rate", value: "0.3%", delta: "0.1%", kind: "down", color: "var(--red)" }]}
         tableHead={["Flow", "Revenue", "Open", "Click", "Status"]}

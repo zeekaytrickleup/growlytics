@@ -315,6 +315,75 @@ export class DashboardService {
     return this.getMockMarketing();
   }
 
+  /** Organic search performance for the SEO tab (live from seo_* metrics, else mock). */
+  async getSeo(workspaceId: string = WORKSPACE_ID) {
+    try {
+      const metrics = await this.prisma.metricSnapshot.findMany({
+        where: { workspaceId, metric: { startsWith: 'seo_' } },
+      });
+      if (metrics.length) {
+        const agg = (metric: string) => {
+          const m = new Map(metrics.filter((r) => r.metric === metric).map((r) => [r.dimension, r.value]));
+          return {
+            clicks: m.get('clicks') ?? 0, impressions: m.get('impressions') ?? 0,
+            ctr: m.get('ctr') ?? 0, position: m.get('position') ?? 0,
+          };
+        };
+        const cur = agg('seo_cur');
+        const prev = agg('seo_prev');
+        const delta = (c: number, p: number) => (p ? `${Math.round(Math.abs((c - p) / p) * 100)}%` : '0%');
+        const fmtN = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`);
+
+        const kpis = [
+          { key: 'clicks', label: 'Clicks', value: fmtN(cur.clicks), delta: delta(cur.clicks, prev.clicks), kind: cur.clicks >= prev.clicks ? 'up' : 'down' },
+          { key: 'ctr', label: 'CTR', value: `${cur.ctr}%`, delta: delta(cur.ctr, prev.ctr), kind: cur.ctr >= prev.ctr ? 'up' : 'down' },
+          { key: 'impressions', label: 'Impressions', value: fmtN(cur.impressions), delta: delta(cur.impressions, prev.impressions), kind: cur.impressions >= prev.impressions ? 'up' : 'down' },
+          // Lower average position is better, so flip the arrow.
+          { key: 'position', label: 'Avg Position', value: `${cur.position}`, delta: delta(cur.position, prev.position), kind: cur.position <= prev.position ? 'up' : 'down' },
+        ];
+
+        const chart = metrics
+          .filter((r) => r.metric === 'seo_day')
+          .sort((a, b) => (a.dimension ?? '').localeCompare(b.dimension ?? ''))
+          .map((r) => ({ d: (r.dimension ?? '').slice(5), v: r.value })); // MM-DD
+
+        const kwClicks = new Map(metrics.filter((r) => r.metric === 'seo_kw_clicks').map((r) => [r.dimension, r.value]));
+        const kwCtr = new Map(metrics.filter((r) => r.metric === 'seo_kw_ctr').map((r) => [r.dimension, r.value]));
+        const kwPos = new Map(metrics.filter((r) => r.metric === 'seo_kw_pos').map((r) => [r.dimension, r.value]));
+        const keywords = Array.from(kwClicks.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([q, clicks]) => ({
+            query: q ?? '', clicks: Math.round(clicks),
+            ctr: kwCtr.get(q) ?? 0, position: kwPos.get(q) ?? 0,
+          }));
+
+        return { source: 'live', kpis, chart, keywords };
+      }
+    } catch (err) {
+      this.logger.warn(`SEO fell back to mock: ${(err as Error).message}`);
+    }
+    return this.getMockSeo();
+  }
+
+  private getMockSeo() {
+    return {
+      source: 'mock',
+      kpis: [
+        { key: 'clicks', label: 'Clicks', value: '7.9k', delta: '22%', kind: 'up' },
+        { key: 'ctr', label: 'CTR', value: '3.8%', delta: '5%', kind: 'up' },
+        { key: 'impressions', label: 'Impressions', value: '208k', delta: '17%', kind: 'up' },
+        { key: 'position', label: 'Avg Position', value: '8.4', delta: '1.2', kind: 'up' },
+      ],
+      chart: [] as { d: string; v: number }[],
+      keywords: [
+        { query: 'wireless earbuds', clicks: 1240, ctr: 4.1, position: 3.2 },
+        { query: 'running hoodie', clicks: 890, ctr: 3.6, position: 5.8 },
+        { query: 'smart water bottle', clicks: 610, ctr: 2.9, position: 9.1 },
+        { query: 'desk lamp led', clicks: 540, ctr: 3.3, position: 6.4 },
+      ],
+    };
+  }
+
   private getMockMarketing() {
     return {
       source: 'mock',

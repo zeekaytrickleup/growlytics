@@ -9,6 +9,7 @@ import { CredentialsStore } from '../connectors/credentials.store';
 export type ConnectCredentials = {
   storeUrl?: string; consumerKey?: string; consumerSecret?: string; // WooCommerce
   apiKey?: string; // Klaviyo
+  serviceAccountJson?: string; siteUrl?: string; // Google Search Console
 };
 
 const WORKSPACE_ID = 'demo-workspace';
@@ -80,12 +81,16 @@ export class IntegrationsService {
       });
     } else if (provider === Provider.KLAVIYO && creds?.apiKey) {
       await this.creds.save(workspaceId, provider, { apiKey: creds.apiKey });
+    } else if (provider === Provider.SEARCH_CONSOLE && creds?.serviceAccountJson && creds.siteUrl) {
+      await this.creds.save(workspaceId, provider, { serviceAccountJson: creds.serviceAccountJson, siteUrl: creds.siteUrl }, { siteUrl: creds.siteUrl });
     }
     await this.upsertStatus(provider, IntegrationStatus.SYNCING, undefined, workspaceId);
     try {
       const result = this.ingestion.supportsMarketing(provider)
         ? await this.ingestion.ingestMarketing(provider, workspaceId)
-        : await this.ingestion.ingest(provider, workspaceId);
+        : this.ingestion.supportsSeo(provider)
+          ? await this.ingestion.ingestSeo(provider, workspaceId)
+          : await this.ingestion.ingest(provider, workspaceId);
       await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
       return { ...result, status: 'connected' };
     } catch (err) {
@@ -99,7 +104,9 @@ export class IntegrationsService {
     try {
       const result = this.ingestion.supportsMarketing(provider)
         ? await this.ingestion.ingestMarketing(provider, workspaceId)
-        : await this.ingestion.ingest(provider, workspaceId);
+        : this.ingestion.supportsSeo(provider)
+          ? await this.ingestion.ingestSeo(provider, workspaceId)
+          : await this.ingestion.ingest(provider, workspaceId);
       await this.upsertStatus(provider, IntegrationStatus.CONNECTED, new Date(), workspaceId);
       return { ...result, status: 'synced' };
     } catch (err) {

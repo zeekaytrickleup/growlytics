@@ -5,6 +5,7 @@ import { InsightsService } from '../insights/insights.service';
 import { ShopifyConnector } from './shopify.connector';
 import { WooCommerceConnector } from './woocommerce.connector';
 import { KlaviyoConnector } from './klaviyo.connector';
+import { SearchConsoleConnector } from './search-console.connector';
 import { Connector, ConnectorConfig } from './connector.interface';
 import { MarketingConnector } from './marketing.interface';
 import { WooCredentialsService } from './woo-credentials.service';
@@ -28,12 +29,60 @@ export class IngestionService {
     private readonly insights: InsightsService,
     private readonly wooCreds: WooCredentialsService,
     private readonly creds: CredentialsStore,
+    private readonly searchConsole: SearchConsoleConnector,
     shopify: ShopifyConnector,
     woocommerce: WooCommerceConnector,
     klaviyo: KlaviyoConnector,
   ) {
     this.connectors = { [Provider.SHOPIFY]: shopify, [Provider.WOOCOMMERCE]: woocommerce };
     this.marketingConnectors = { [Provider.KLAVIYO]: klaviyo };
+  }
+
+  supportsSeo(provider: Provider): boolean {
+    return provider === Provider.SEARCH_CONSOLE;
+  }
+
+  /** Sync Google Search Console into seo_* MetricSnapshots. */
+  async ingestSeo(provider: Provider, workspaceId: string = WORKSPACE_ID) {
+    await this.prisma.workspace.upsert({
+      where: { id: workspaceId },
+      update: {},
+      create: { id: workspaceId, name: 'Northwind Goods' },
+    });
+    const credsData = await this.creds.resolve(workspaceId, provider);
+    if (!credsData) throw new Error('Search Console not configured — add a service account key + site URL.');
+    const data = await this.searchConsole.sync(credsData);
+
+    await this.prisma.metricSnapshot.deleteMany({
+      where: {
+        workspaceId,
+        source: provider,
+        metric: { in: ['seo_cur', 'seo_prev', 'seo_day', 'seo_kw_clicks', 'seo_kw_impr', 'seo_kw_ctr', 'seo_kw_pos'] },
+      },
+    });
+    const now = new Date();
+    const rows: { workspaceId: string; source: Provider; metric: string; dimension: string; value: number; ts: Date }[] = [];
+    // Totals (cur + prev) stored as one metric each with dimension = field name.
+    for (const [period, agg] of [['seo_cur', data.cur], ['seo_prev', data.prev]] as const) {
+      rows.push(
+        { workspaceId, source: provider, metric: period, dimension: 'clicks', value: agg.clicks, ts: now },
+        { workspaceId, source: provider, metric: period, dimension: 'impressions', value: agg.impressions, ts: now },
+        { workspaceId, source: provider, metric: period, dimension: 'ctr', value: agg.ctr, ts: now },
+        { workspaceId, source: provider, metric: period, dimension: 'position', value: agg.position, ts: now },
+      );
+    }
+    for (const d of data.daily) rows.push({ workspaceId, source: provider, metric: 'seo_day', dimension: d.date, value: d.clicks, ts: now });
+    for (const k of data.keywords) {
+      rows.push(
+        { workspaceId, source: provider, metric: 'seo_kw_clicks', dimension: k.query, value: k.clicks, ts: now },
+        { workspaceId, source: provider, metric: 'seo_kw_impr', dimension: k.query, value: k.impressions, ts: now },
+        { workspaceId, source: provider, metric: 'seo_kw_ctr', dimension: k.query, value: k.ctr, ts: now },
+        { workspaceId, source: provider, metric: 'seo_kw_pos', dimension: k.query, value: k.position, ts: now },
+      );
+    }
+    await this.prisma.metricSnapshot.createMany({ data: rows });
+    this.logger.log(`Ingested SEO ${provider}: ${data.keywords.length} keywords, ${data.daily.length} days.`);
+    return { provider, ingested: true, keywords: data.keywords.length };
   }
 
   /** Per-workspace config for a connector (e.g. the WooCommerce store's saved credentials). */
@@ -46,7 +95,7 @@ export class IngestionService {
   }
 
   supports(provider: Provider): boolean {
-    return provider in this.connectors || provider in this.marketingConnectors;
+    return provider in this.connectors || provider in this.marketingConnectors || this.supportsSeo(provider);
   }
 
   supportsMarketing(provider: Provider): boolean {
