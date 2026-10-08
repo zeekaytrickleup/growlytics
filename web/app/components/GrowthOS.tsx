@@ -12,11 +12,11 @@ import {
   AlertTriangle, Clock, ChevronRight, Plus, Send, Menu,
   DollarSign, ShoppingCart, Percent, Repeat, Star, Download, Cpu, Flame,
   Wallet, RefreshCw, Lightbulb, ArrowRight, Globe, Search as SearchIcon,
-  Calendar, SlidersHorizontal,
+  Calendar, SlidersHorizontal, Trash2,
 } from "lucide-react";
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
-  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, fetchMarketing, fetchSeo,
+  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, deleteWorkspace, fetchMarketing, fetchSeo,
   type Overview, type Integration, type ReportResult, type ReportOpts, type Me, type WooCreds, type Marketing, type Seo,
 } from "../lib/api";
 
@@ -204,6 +204,11 @@ const STYLES = `
 .report-check { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; cursor: pointer; transition: all .14s; }
 .report-check input { margin-top: 2px; accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
 .report-h { font-size: 13px; font-weight: 700; color: var(--text); padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
+
+/* workspace switcher row remove button */
+.ws-row .ws-del { margin-left: auto; opacity: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; border: none; background: transparent; color: var(--mute); cursor: pointer; transition: all .14s; }
+.ws-row:hover .ws-del { opacity: 1; }
+.ws-row .ws-del:hover { background: rgba(248,113,113,0.15); color: var(--red); }
 
 .chip { font-size: 12px; padding: 7px 13px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--dim); cursor: pointer; transition: all .16s; }
 .chip:hover { color: var(--text); }
@@ -1734,6 +1739,9 @@ export default function GrowthOS() {
   const [wsId, setWsId] = useState("demo-workspace");
   const [wsOpen, setWsOpen] = useState(false);
   const [addStore, setAddStore] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeErr, setRemoveErr] = useState("");
 
   useEffect(() => {
     setToday(new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }));
@@ -1837,10 +1845,15 @@ export default function GrowthOS() {
                     <div style={{ position: "absolute", right: 0, top: "116%", zIndex: 50, minWidth: 210, background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, boxShadow: "var(--shadow)", overflow: "hidden" }}>
                       <div style={{ padding: "8px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--mute)", fontWeight: 700 }}>Workspaces</div>
                       {me.workspaces.map(w => (
-                        <div key={w.id} onClick={() => switchWs(w.id)} style={{ padding: "10px 12px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, background: w.id === wsId ? "var(--surface-2)" : "transparent", color: w.id === wsId ? "#fff" : "var(--dim)" }}>
+                        <div key={w.id} className="ws-row" onClick={() => switchWs(w.id)} style={{ padding: "10px 12px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, background: w.id === wsId ? "var(--surface-2)" : "transparent", color: w.id === wsId ? "#fff" : "var(--dim)" }}>
                           <span style={{ width: 7, height: 7, borderRadius: 7, background: w.id === wsId ? "var(--emerald)" : "var(--mute)" }} />
                           {w.name}
-                          <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--mute)" }}>{w.role}</span>
+                          {me.workspaces.length > 1 && (
+                            <button className="ws-del" title="Remove this store"
+                              onClick={(e) => { e.stopPropagation(); setWsOpen(false); setRemoveErr(""); setRemoveTarget({ id: w.id, name: w.name }); }}>
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       ))}
                       <div onClick={() => { setWsOpen(false); setAddStore(true); }} style={{ padding: "10px 12px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, color: "var(--primary-2)", fontWeight: 600, borderTop: "1px solid var(--border)" }}>
@@ -1872,6 +1885,56 @@ export default function GrowthOS() {
             go("dashboard"); // land on the new store's dashboard
           }}
         />
+      )}
+      {removeTarget && (
+        <div className="cmd-overlay" onClick={() => !removing && setRemoveTarget(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.3)", display: "grid", placeItems: "center", color: "var(--red)" }}><Trash2 size={17} /></div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>Remove “{removeTarget.name}”?</div>
+                  <div style={{ fontSize: 11.5, color: "var(--mute)" }}>This can’t be undone</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.5 }}>
+                This permanently deletes the store and <b>all its data</b> — products, metrics, SEO, connected integrations and reports. Your other stores are not affected.
+              </div>
+              {removeErr && <div className="form-err">{removeErr}</div>}
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button className="btn ghost" style={{ flex: 1, justifyContent: "center" }} onClick={() => setRemoveTarget(null)} disabled={removing}>Cancel</button>
+                <button className="btn" style={{ flex: 1, justifyContent: "center", borderColor: "var(--red)", color: "var(--red)" }} disabled={removing}
+                  onClick={async () => {
+                    setRemoving(true); setRemoveErr("");
+                    const prevWs = getWorkspace();
+                    // Scope the DELETE to the target workspace.
+                    setWorkspace(removeTarget.id);
+                    const res = await deleteWorkspace(removeTarget.id);
+                    if (!res || !res.deleted) {
+                      setWorkspace(prevWs);
+                      setRemoveErr(res?.error ?? "Could not remove the store.");
+                      setRemoving(false);
+                      return;
+                    }
+                    const removedActive = removeTarget.id === wsId;
+                    const m = await fetchMe();
+                    if (m) setMe(m);
+                    const next = (m?.workspaces ?? []).find(w => w.id !== removeTarget.id)?.id ?? "demo-workspace";
+                    setWorkspace(removedActive ? next : prevWs);
+                    if (removedActive) { setWsId(next); }
+                    setRemoving(false);
+                    setRemoveTarget(null);
+                    go("dashboard");
+                  }}>
+                  {removing ? <><RefreshCw size={14} style={{ animation: "spin 1.4s linear infinite" }} /> Removing…</> : "Remove store"}
+                </button>
+              </div>
+            </div>
+          </div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>
       )}
     </div>
   );

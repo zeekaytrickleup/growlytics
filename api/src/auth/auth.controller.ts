@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { Workspace } from './workspace.decorator';
 
@@ -14,5 +14,10 @@ export class AuthController {
   @Post('workspaces')
   createWorkspace(@Body() body: { name?: string }) {
     return this.auth.createWorkspace(body?.name ?? '');
+  }
+
+  @Delete('workspaces/:id')
+  deleteWorkspace(@Param('id') id: string) {
+    return this.auth.deleteWorkspace(id);
   }
 }

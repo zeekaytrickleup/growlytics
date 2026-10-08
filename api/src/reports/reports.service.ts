@@ -128,7 +128,7 @@ export class ReportsService {
 
   async pdf(workspaceId: string = WORKSPACE_ID, opts: ReportOptions = {}): Promise<Buffer> {
     const data = await this.summary(workspaceId, opts);
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
     const chunks: Buffer[] = [];
 
     return new Promise<Buffer>((resolve, reject) => {
@@ -136,88 +136,173 @@ export class ReportsService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      const purple = '#5b5bd6';
-      const dim = '#555';
-      const heading = (t: string) => {
-        doc.moveDown(0.8);
-        doc.fillColor('#111').fontSize(13).text(t);
-        doc.moveDown(0.4);
-      };
-      const kpiGrid = (kpis: KpiLine[]) => {
-        const startY = doc.y;
-        const colW = 165;
-        kpis.forEach((k, i) => {
-          const x = 50 + (i % 3) * colW;
-          const y = startY + Math.floor(i / 3) * 58;
-          doc.fillColor(dim).fontSize(9).text(k.label.toUpperCase(), x, y, { width: colW - 6 });
-          doc.fillColor('#111').fontSize(17).text(k.value, x, y + 12);
-          doc.fillColor(k.kind === 'up' ? '#0a8' : '#c33').fontSize(9).text(`${k.kind === 'up' ? '+' : '-'}${k.delta}`, x, y + 33);
-        });
-        doc.y = startY + Math.ceil(kpis.length / 3) * 58 + 6;
-      };
-      const row = (cols: string[], widths: number[], bold = false) => {
+      // Palette
+      const PURPLE = '#5b5bd6';
+      const PURPLE_LT = '#eef0fd';
+      const INK = '#1f2430';
+      const DIM = '#6b7280';
+      const LINE = '#e6e8ef';
+      const ROW_ALT = '#fafbfe';
+      const GREEN = '#0a8f5b';
+      const RED = '#d14343';
+
+      const M = 50;
+      const PAGE_W = doc.page.width;
+      const PAGE_H = doc.page.height;
+      const CW = PAGE_W - M * 2;
+      const BOTTOM = PAGE_H - 58;
+      const ensure = (h: number) => { if (doc.y + h > BOTTOM) doc.addPage(); };
+
+      // --- Header band (page 1) ---
+      doc.rect(0, 0, PAGE_W, 96).fill(PURPLE);
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(20).text('Growlytics AI', M, 30);
+      doc.font('Helvetica').fontSize(10.5).fillColor('#e4e4fb').text('Performance Report', M, 56);
+      // right-aligned store + meta
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#ffffff').text(data.store, PAGE_W / 2, 30, { width: CW / 2, align: 'right' });
+      doc.font('Helvetica').fontSize(9).fillColor('#e4e4fb')
+        .text(data.period, PAGE_W / 2, 50, { width: CW / 2, align: 'right' })
+        .text(`Generated ${new Date(data.generatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`, PAGE_W / 2, 63, { width: CW / 2, align: 'right' });
+      doc.y = 120;
+
+      // --- Reusable builders ---
+      const sectionHeader = (title: string, tag?: string) => {
+        ensure(40);
+        doc.moveDown(0.6);
         const y = doc.y;
-        let x = 50;
-        doc.fontSize(9.5).fillColor(bold ? '#111' : '#333');
-        cols.forEach((c, i) => { doc.text(c, x, y, { width: widths[i] - 6, ellipsis: true }); x += widths[i]; });
-        doc.y = y + 15;
+        doc.rect(M, y + 1, 3.5, 15).fill(PURPLE);
+        doc.fillColor(INK).font('Helvetica-Bold').fontSize(13.5).text(title, M + 11, y);
+        if (tag) {
+          doc.font('Helvetica').fontSize(8).fillColor(DIM)
+            .text(tag, M, y + 2, { width: CW, align: 'right' });
+        }
+        doc.moveDown(0.7);
+        doc.font('Helvetica').fillColor(INK);
       };
 
-      // Header
-      doc.fillColor(purple).fontSize(22).text('Growlytics AI', { continued: true }).fillColor('#111').text('  Report');
-      doc.moveDown(0.2);
-      doc.fillColor(dim).fontSize(10).text(`${data.store} · ${data.period} · Generated ${new Date(data.generatedAt).toLocaleString('en-US')}`);
-      doc.moveTo(50, doc.y + 8).lineTo(545, doc.y + 8).strokeColor('#ddd').stroke();
+      const kpiCards = (kpis: KpiLine[]) => {
+        if (!kpis.length) return;
+        const cols = Math.min(3, kpis.length);
+        const gap = 12;
+        const cardW = (CW - gap * (cols - 1)) / cols;
+        const cardH = 56;
+        const rows = Math.ceil(kpis.length / cols);
+        ensure(rows * (cardH + gap));
+        const startY = doc.y;
+        kpis.forEach((k, i) => {
+          const c = i % cols;
+          const r = Math.floor(i / cols);
+          const x = M + c * (cardW + gap);
+          const y = startY + r * (cardH + gap);
+          doc.lineWidth(1).roundedRect(x, y, cardW, cardH, 7).fillAndStroke('#ffffff', LINE);
+          doc.fillColor(DIM).font('Helvetica').fontSize(7.5).text(k.label.toUpperCase(), x + 11, y + 10, { width: cardW - 22, characterSpacing: 0.3 });
+          doc.fillColor(INK).font('Helvetica-Bold').fontSize(16).text(k.value, x + 11, y + 21, { width: cardW - 22, ellipsis: true });
+          doc.fillColor(k.kind === 'up' ? GREEN : RED).font('Helvetica').fontSize(8.5)
+            .text(`${k.kind === 'up' ? '▲' : '▼'} ${k.delta}`, x + 11, y + 41);
+        });
+        doc.y = startY + rows * (cardH + gap) + 2;
+        doc.fillColor(INK);
+      };
 
+      const table = (headers: string[], widths: number[], aligns: ('left' | 'right')[], rows: string[][]) => {
+        const rowH = 20;
+        const drawHead = () => {
+          ensure(rowH * 2);
+          const y = doc.y;
+          doc.rect(M, y, CW, rowH).fill(PURPLE_LT);
+          let x = M;
+          doc.fillColor(PURPLE).font('Helvetica-Bold').fontSize(8).strokeColor(PURPLE_LT);
+          headers.forEach((h, i) => {
+            doc.text(h.toUpperCase(), x + 7, y + 6.5, { width: widths[i] - 12, align: aligns[i], characterSpacing: 0.2 });
+            x += widths[i];
+          });
+          doc.y = y + rowH;
+        };
+        drawHead();
+        rows.forEach((row, ri) => {
+          if (doc.y + rowH > BOTTOM) { doc.addPage(); drawHead(); }
+          const y = doc.y;
+          if (ri % 2 === 1) doc.rect(M, y, CW, rowH).fill(ROW_ALT);
+          let x = M;
+          doc.font('Helvetica').fontSize(8.8).fillColor(INK);
+          row.forEach((cell, ci) => {
+            doc.fillColor(ci === 0 ? INK : '#3a4150')
+              .text(cell, x + 7, y + 6.5, { width: widths[ci] - 12, align: aligns[ci], ellipsis: true });
+            x += widths[ci];
+          });
+          doc.y = y + rowH;
+        });
+        doc.moveTo(M, doc.y).lineTo(M + CW, doc.y).lineWidth(0.6).strokeColor(LINE).stroke();
+        doc.moveDown(0.3);
+      };
+
+      // --- Sections ---
       if (data.revenue) {
-        heading('Revenue & Overview');
-        kpiGrid(data.revenue.kpis);
-        doc.fillColor('#333').fontSize(10.5).text(data.revenue.narrative, { lineGap: 3 });
+        sectionHeader('Revenue & Overview', data.source === 'live' ? 'Live store data' : 'Sample data');
+        kpiCards(data.revenue.kpis);
+        doc.moveDown(0.3);
+        ensure(60);
+        doc.fillColor('#3a4150').font('Helvetica').fontSize(10).text(data.revenue.narrative, M, doc.y, { width: CW, lineGap: 3, align: 'justify' });
         if (data.revenue.insights.length) {
-          doc.moveDown(0.6);
-          doc.fillColor('#111').fontSize(11).text('AI recommendations');
-          doc.moveDown(0.3);
+          doc.moveDown(0.7);
+          ensure(30);
+          doc.fillColor(INK).font('Helvetica-Bold').fontSize(10.5).text('AI Recommendations', M, doc.y);
+          doc.moveDown(0.4);
           data.revenue.insights.forEach((ins) => {
-            doc.fillColor(purple).fontSize(10.5).text(`• ${ins.title}`);
-            doc.fillColor('#444').fontSize(9.5).text(ins.body, { indent: 12, lineGap: 2 });
-            doc.moveDown(0.3);
+            ensure(34);
+            const y = doc.y;
+            doc.circle(M + 3, y + 5, 2).fill(PURPLE);
+            doc.fillColor(INK).font('Helvetica-Bold').fontSize(9.5).text(ins.title, M + 12, y, { width: CW - 12 });
+            doc.fillColor('#4b5563').font('Helvetica').fontSize(9).text(ins.body, M + 12, doc.y, { width: CW - 12, lineGap: 1.5 });
+            doc.moveDown(0.5);
           });
         }
       }
 
       if (data.products) {
-        heading('Top Products');
-        const w = [210, 90, 70, 60, 60];
-        row(['Product', 'Revenue', 'Orders', 'CR %', 'Stock'], w, true);
-        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#eee').stroke();
-        doc.moveDown(0.2);
-        data.products.items.forEach((p) =>
-          row([p.name, p.rev, String(p.orders), String(p.cr), p.stock < 0 ? 'In stock' : String(p.stock)], w),
+        sectionHeader('Top Products');
+        table(
+          ['Product', 'Revenue', 'Orders', 'CR %', 'Stock'],
+          [205, 95, 70, 55, 70],
+          ['left', 'right', 'right', 'right', 'right'],
+          data.products.items.map((p) => [p.name, p.rev, String(p.orders), String(p.cr), p.stock < 0 ? 'In stock' : p.stock === 0 ? 'Out of stock' : String(p.stock)]),
         );
       }
 
       if (data.seo) {
-        heading(`SEO — Search Console${data.seo.source === 'live' ? '' : ' (sample)'}`);
-        kpiGrid(data.seo.kpis);
-        const w = [260, 80, 70, 80];
-        row(['Keyword', 'Clicks', 'CTR %', 'Position'], w, true);
-        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#eee').stroke();
-        doc.moveDown(0.2);
-        data.seo.keywords.forEach((k) => row([k.query, String(k.clicks), String(k.ctr), String(k.position)], w));
+        sectionHeader('SEO — Search Console', data.seo.source === 'live' ? 'Live Search Console' : 'Sample data');
+        kpiCards(data.seo.kpis);
+        doc.moveDown(0.3);
+        table(
+          ['Keyword', 'Clicks', 'CTR %', 'Avg Position'],
+          [245, 80, 70, 100],
+          ['left', 'right', 'right', 'right'],
+          data.seo.keywords.map((k) => [k.query, k.clicks.toLocaleString('en-US'), String(k.ctr), String(k.position)]),
+        );
       }
 
       if (data.marketing) {
-        heading(`Marketing — Channels${data.marketing.source === 'live' ? '' : ' (sample)'}`);
-        kpiGrid(data.marketing.kpis);
-        const w = [150, 90, 100, 70, 80];
-        row(['Channel', 'Spend', 'Revenue', 'ROAS', 'Conv.'], w, true);
-        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#eee').stroke();
-        doc.moveDown(0.2);
-        data.marketing.channels.forEach((c) => row([c.name, c.spend, c.rev, c.roas, String(c.conv)], w));
+        sectionHeader('Marketing — Channels', data.marketing.source === 'live' ? 'Live data' : 'Sample data');
+        kpiCards(data.marketing.kpis);
+        doc.moveDown(0.3);
+        table(
+          ['Channel', 'Spend', 'Revenue', 'ROAS', 'Conv.'],
+          [150, 90, 100, 75, 80],
+          ['left', 'right', 'right', 'right', 'right'],
+          data.marketing.channels.map((c) => [c.name, c.spend, c.rev, c.roas, String(c.conv)]),
+        );
       }
 
-      doc.moveDown(1.2);
-      doc.fillColor('#999').fontSize(8).text(`Data source: ${data.source} · Growlytics AI — Your AI Co-Pilot for Smarter E-commerce Growth`, { align: 'center' });
+      // --- Footer on every page ---
+      const range = doc.bufferedPageRange();
+      for (let i = 0; i < range.count; i++) {
+        doc.switchToPage(range.start + i);
+        const y = PAGE_H - 42;
+        doc.moveTo(M, y).lineTo(M + CW, y).lineWidth(0.5).strokeColor(LINE).stroke();
+        doc.fillColor(DIM).font('Helvetica').fontSize(7.5)
+          .text('Growlytics AI — Your AI Co-Pilot for Smarter E-commerce Growth', M, y + 7, { width: CW, align: 'left' });
+        doc.text(`Page ${i + 1} of ${range.count}`, M, y + 7, { width: CW, align: 'right' });
+      }
+
       doc.end();
     });
   }

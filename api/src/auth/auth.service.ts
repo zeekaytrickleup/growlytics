@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -41,6 +41,24 @@ export class AuthService {
       currentWorkspaceId,
       workspaces: [{ id: 'demo-workspace', name: 'Northwind Goods', role: 'OWNER' }],
     };
+  }
+
+  /** Permanently delete a workspace (store) and all its data (cascades via the schema). */
+  async deleteWorkspace(workspaceId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: DEMO_USER_EMAIL },
+      include: { memberships: true },
+    });
+    const count = user?.memberships.length ?? 0;
+    if (count <= 1) {
+      throw new BadRequestException('You cannot remove your only store.');
+    }
+    try {
+      await this.prisma.workspace.delete({ where: { id: workspaceId } });
+    } catch {
+      throw new NotFoundException('Store not found.');
+    }
+    return { id: workspaceId, deleted: true };
   }
 
   /** Create a new workspace (one per store) and make the current demo user its owner. */

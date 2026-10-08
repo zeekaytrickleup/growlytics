@@ -155,6 +155,18 @@ export const syncIntegration = (provider: string) =>
 export const createWorkspace = (name: string) =>
   postJson<{ id: string; name: string; role: string }>("/workspaces", { name });
 
+// Permanently delete a workspace (store) and all its data.
+export async function deleteWorkspace(id: string): Promise<{ deleted: boolean; error?: string } | null> {
+  try {
+    const res = await fetch(`${API_URL}/workspaces/${encodeURIComponent(id)}`, { method: "DELETE", headers: wsHeaders() });
+    const data = (await res.json().catch(() => ({}))) as { deleted?: boolean; message?: string };
+    if (!res.ok) return { deleted: false, error: data.message ?? "Could not remove the store." };
+    return { deleted: !!data.deleted };
+  } catch {
+    return null;
+  }
+}
+
 export async function askAssistant(question: string): Promise<AIAnswer | null> {
   try {
     const res = await fetch(`${API_URL}/assistant/ask`, {
