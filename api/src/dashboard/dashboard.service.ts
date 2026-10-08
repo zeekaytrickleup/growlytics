@@ -384,6 +384,127 @@ export class DashboardService {
     };
   }
 
+  /** Revenue/orders forecast projected from the store's daily history (trend regression). */
+  async getForecast(workspaceId: string = WORKSPACE_ID) {
+    try {
+      const metrics = await this.prisma.metricSnapshot.findMany({
+        where: { workspaceId, metric: { in: ['day_rev', 'day_ord'] } },
+      });
+      const dayRev = new Map(metrics.filter((r) => r.metric === 'day_rev').map((r) => [r.dimension, r.value]));
+      const dayOrd = new Map(metrics.filter((r) => r.metric === 'day_ord').map((r) => [r.dimension, r.value]));
+      if (!dayRev.size) return this.getMockForecast();
+
+      const DAYMS = 86_400_000;
+      const now = Date.now();
+      const key = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+      const md = (ms: number) => { const dt = new Date(ms); return `${dt.getUTCMonth() + 1}/${dt.getUTCDate()}`; };
+
+      // 26 weeks of weekly revenue + orders (oldest -> newest).
+      const WEEKS = 26;
+      const weeksRev: number[] = [];
+      const weeksOrd: number[] = [];
+      const weekEnd: number[] = [];
+      for (let w = 0; w < WEEKS; w++) {
+        let r = 0, o = 0;
+        const endMs = now - (WEEKS - 1 - w) * 7 * DAYMS;
+        for (let d = 0; d < 7; d++) {
+          const ms = endMs - d * DAYMS;
+          r += dayRev.get(key(ms)) || 0;
+          o += dayOrd.get(key(ms)) || 0;
+        }
+        weeksRev.push(r); weeksOrd.push(o); weekEnd.push(endMs);
+      }
+
+      // Trim leading + trailing zero weeks (store not launched / current stockout) to get the active trend.
+      let end = weeksRev.length; while (end > 0 && weeksRev[end - 1] === 0) end--;
+      let start = 0; while (start < end && weeksRev[start] === 0) start++;
+      const activeRev = weeksRev.slice(start, end);
+      const activeOrd = weeksOrd.slice(start, end);
+      const activeEnds = weekEnd.slice(start, end);
+      const trailingZeros = weeksRev.length - end;
+      if (activeRev.length < 4) return this.getMockForecast();
+
+      const linreg = (ys: number[]) => {
+        const n = ys.length;
+        const mx = (n - 1) / 2;
+        const my = ys.reduce((a, b) => a + b, 0) / n;
+        let num = 0, den = 0;
+        for (let i = 0; i < n; i++) { num += (i - mx) * (ys[i] - my); den += (i - mx) ** 2; }
+        const slope = den ? num / den : 0;
+        return { slope, intercept: my - slope * mx };
+      };
+      const rev = linreg(activeRev);
+      const ord = linreg(activeOrd);
+      const n = activeRev.length;
+
+      // Project the next 13 weeks (~90 days).
+      const PROJ = 13;
+      const projRev: number[] = [];
+      const projOrd: number[] = [];
+      for (let i = 1; i <= PROJ; i++) {
+        projRev.push(Math.max(0, rev.intercept + rev.slope * (n - 1 + i)));
+        projOrd.push(Math.max(0, ord.intercept + ord.slope * (n - 1 + i)));
+      }
+      const next90Rev = projRev.reduce((a, b) => a + b, 0);
+      const next90Ord = projOrd.reduce((a, b) => a + b, 0);
+      const meanWeekly = activeRev.reduce((a, b) => a + b, 0) / n;
+      const recent90 = activeRev.slice(-PROJ).reduce((a, b) => a + b, 0);
+      const recent90Ord = activeOrd.slice(-PROJ).reduce((a, b) => a + b, 0);
+      const growth = recent90 ? Math.round(((next90Rev - recent90) / recent90) * 100) : 0;
+      const growthOrd = recent90Ord ? Math.round(((next90Ord - recent90Ord) / recent90Ord) * 100) : 0;
+      // Volatility → a rough confidence band.
+      const variance = activeRev.reduce((a, b) => a + (b - meanWeekly) ** 2, 0) / n;
+      const cv = meanWeekly ? Math.sqrt(variance) / meanWeekly : 0;
+      const band = Math.min(60, Math.round(cv * 100));
+      const confidence = Math.max(45, Math.min(92, 95 - band));
+
+      const money = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`);
+      const kpis = [
+        { key: 'rev90', label: 'Revenue (next 90d)', value: money(next90Rev), delta: `${Math.abs(growth)}%`, kind: growth >= 0 ? 'up' : 'down' },
+        { key: 'ord90', label: 'Orders (next 90d)', value: Math.round(next90Ord).toLocaleString('en-US'), delta: `${Math.abs(growthOrd)}%`, kind: growthOrd >= 0 ? 'up' : 'down' },
+        { key: 'avgwk', label: 'Avg / week', value: money(meanWeekly), delta: `${growth >= 0 ? '+' : '-'}trend`, kind: rev.slope >= 0 ? 'up' : 'down' },
+        { key: 'conf', label: 'Confidence', value: `${confidence}%`, delta: `±${band}%`, kind: 'up' },
+      ];
+
+      // Chart: last 6 active weeks (actual) + 13 projected weeks.
+      const chart: { d: string; v: number }[] = [];
+      const tail = Math.min(6, n);
+      for (let i = n - tail; i < n; i++) chart.push({ d: md(activeEnds[i]), v: Math.round(activeRev[i]) });
+      for (let i = 0; i < PROJ; i++) chart.push({ d: md(now + (i + 1) * 7 * DAYMS), v: Math.round(projRev[i]) });
+
+      const aiNote =
+        `Based on ${n} weeks of your sales history, revenue is trending ${rev.slope >= 0 ? 'upward' : 'downward'}. ` +
+        `The model projects about ${money(next90Rev)} over the next 90 days (±${band}%, ${confidence}% confidence)` +
+        (growth ? `, a ${Math.abs(growth)}% ${growth >= 0 ? 'increase' : 'decrease'} vs. the last 90 days` : '') + '. ' +
+        (trailingZeros > 0
+          ? `Note: the most recent ${trailingZeros} week(s) show $0 (your current stockout) and were excluded — this forecast assumes you restock your top sellers. `
+          : '') +
+        'Pre-commit inventory for your best sellers ahead of demand to protect the forecast.';
+
+      return { source: 'live', kpis, chart, aiNote };
+    } catch (err) {
+      this.logger.warn(`Forecast fell back to mock: ${(err as Error).message}`);
+      return this.getMockForecast();
+    }
+  }
+
+  private getMockForecast() {
+    return {
+      source: 'mock',
+      kpis: [
+        { key: 'rev90', label: 'Q4 Revenue (proj)', value: '$483k', delta: '31%', kind: 'up' },
+        { key: 'ord90', label: 'Orders (proj)', value: '11.4k', delta: '24%', kind: 'up' },
+        { key: 'cust', label: 'New Customers', value: '4.2k', delta: '19%', kind: 'up' },
+        { key: 'budget', label: 'Ad Budget (rec)', value: '$78k', delta: '12%', kind: 'up' },
+      ],
+      chart: [
+        { d: 'Jul', v: 82 }, { d: 'Aug', v: 91 }, { d: 'Sep', v: 104 },
+        { d: 'Oct', v: 121 }, { d: 'Nov', v: 168 }, { d: 'Dec', v: 210 },
+      ],
+      aiNote: 'Sample projection — connect a store with enough sales history to see a real forecast.',
+    };
+  }
+
   private getMockMarketing() {
     return {
       source: 'mock',

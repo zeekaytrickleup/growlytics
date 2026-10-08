@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
-  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, deleteWorkspace, fetchMarketing, fetchSeo,
-  type Overview, type Integration, type ReportResult, type ReportOpts, type Me, type WooCreds, type Marketing, type Seo,
+  fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, deleteWorkspace, fetchMarketing, fetchSeo, fetchForecast,
+  type Overview, type Integration, type ReportResult, type ReportOpts, type Me, type WooCreds, type Marketing, type Seo, type Forecast,
 } from "../lib/api";
 
 /* ============================================================
@@ -853,6 +853,44 @@ function Products() {
         </div>
       </div>
     </div>
+  );
+}
+
+const FC_KPI_META: Record<string, { icon: KpiDef["icon"]; color: string }> = {
+  rev90: { icon: TrendingUp, color: "var(--emerald)" },
+  ord90: { icon: ShoppingCart, color: "var(--primary-2)" },
+  avgwk: { icon: DollarSign, color: "var(--blue)" },
+  conf: { icon: Target, color: "var(--purple)" },
+};
+
+/** Forecasting tab — real revenue/orders projection from the store's sales history. */
+function ForecastScreen() {
+  const [data, setData] = useState<Forecast | null>(null);
+  useEffect(() => { fetchForecast().then(d => { if (d) setData(d); }); }, []);
+  const live = data?.source === "live";
+
+  const kpiSrc = data?.kpis ?? [
+    { key: "rev90", label: "Q4 Revenue (proj)", value: "$483k", delta: "31%", kind: "up" },
+    { key: "ord90", label: "Orders (proj)", value: "11.4k", delta: "24%", kind: "up" },
+    { key: "avgwk", label: "New Customers", value: "4.2k", delta: "19%", kind: "up" },
+    { key: "conf", label: "Ad Budget (rec)", value: "$78k", delta: "12%", kind: "up" },
+  ];
+  const kpis: KpiDef[] = kpiSrc.map(k => {
+    const m = FC_KPI_META[k.key] ?? { icon: TrendingUp, color: "var(--primary-2)" };
+    return { icon: m.icon, label: k.label, value: k.value, delta: k.delta, kind: k.kind, color: m.color };
+  });
+  const chart = data?.chart ? data.chart.map(c => ({ k: c.d, v: c.v })) : fcChart;
+  const aiNote = data?.aiNote ?? "Model projects a Nov–Dec surge driven by seasonality. Pre-commit inventory for your top SKUs by mid-October.";
+
+  return (
+    <MetricScreen
+      title="Revenue Forecast"
+      sub={live ? "Projected from your sales history · next ~90 days" : "Sample projection — needs sales history"}
+      live={live}
+      kpis={kpis}
+      chart={chart}
+      aiNote={aiNote}
+    />
   );
 }
 
@@ -1785,10 +1823,7 @@ export default function GrowthOS() {
         rows={[["Abandoned Cart", "$8,400", "44%", "9.1%", "Active"], ["Welcome Flow", "$6,100", "52%", "8.4%", "Active"], ["Win-back", "$3,200", "31%", "4.2%", "Active"], ["Post-Purchase", "$4,900", "48%", "7.0%", "Active"]]}
         aiNote="Your abandoned-cart flow drives $8.4k but stops after one email. Adding a second reminder at 24h with a small incentive typically lifts flow revenue 20–30%." />;
       case "inventory": return <Inventory />;
-      case "forecasting": return <MetricScreen title="Revenue Forecast" sub="AI projection · next 6 months (95% interval)"
-        kpis={[{ icon: TrendingUp, label: "Q4 Revenue (proj)", value: "$483k", delta: "31%", kind: "up", color: "var(--emerald)" }, { icon: ShoppingCart, label: "Orders (proj)", value: "11.4k", delta: "24%", kind: "up", color: "var(--primary-2)" }, { icon: Users, label: "New Customers", value: "4.2k", delta: "19%", kind: "up", color: "var(--purple)" }, { icon: Wallet, label: "Ad Budget (rec)", value: "$78k", delta: "12%", kind: "up", color: "var(--blue)" }]}
-        chart={fcChart}
-        aiNote="Model projects a Nov–Dec surge (+68% MoM) driven by seasonality. To hit the forecast, pre-commit inventory for your top 5 SKUs by mid-October and stage holiday creative now." />;
+      case "forecasting": return <ForecastScreen />;
       default: return <Dashboard go={go} />;
     }
   };

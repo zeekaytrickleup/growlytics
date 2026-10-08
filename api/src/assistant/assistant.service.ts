@@ -30,11 +30,12 @@ export class AssistantService {
   private async buildContext(workspaceId: string) {
     // Pull every connected area in parallel; each falls back independently so one failure
     // never blanks the whole snapshot.
-    const [overview, productsRes, seo, marketing] = await Promise.all([
+    const [overview, productsRes, seo, marketing, forecast] = await Promise.all([
       this.dashboard.getOverview(workspaceId).catch(() => null),
       this.dashboard.getProducts(workspaceId).catch(() => null),
       this.dashboard.getSeo(workspaceId).catch(() => null),
       this.dashboard.getMarketing(workspaceId).catch(() => null),
+      this.dashboard.getForecast(workspaceId).catch(() => null),
     ]);
 
     let segments: { name: string; n: number }[] = [];
@@ -73,6 +74,8 @@ export class AssistantService {
       marketing: marketing
         ? { source: marketing.source, kpis: marketing.kpis, channels: marketing.channels }
         : null,
+      // Revenue/orders forecast for the next ~90 days (projected from sales history).
+      forecast: forecast ? { source: forecast.source, kpis: forecast.kpis, note: forecast.aiNote } : null,
     };
   }
 

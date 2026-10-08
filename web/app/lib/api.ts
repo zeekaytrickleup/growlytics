@@ -125,6 +125,9 @@ export type SeoKeyword = { query: string; clicks: number; ctr: number; position:
 export type Seo = { source: string; kpis: SeoKpi[]; chart: { d: string; v: number }[]; keywords: SeoKeyword[] };
 export const fetchSeo = () => getJson<Seo>("/dashboard/seo");
 
+export type Forecast = { source: string; kpis: { key: string; label: string; value: string; delta: string; kind: string }[]; chart: { d: string; v: number }[]; aiNote: string };
+export const fetchForecast = () => getJson<Forecast>("/dashboard/forecast");
+
 export const fetchIntegrations = () =>
   getJson<{ integrations: Integration[] }>("/integrations").then((r) => r?.integrations ?? null);
 

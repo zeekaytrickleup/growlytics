@@ -37,4 +37,9 @@ export class DashboardController {
   getSeo(@Workspace() workspaceId: string) {
     return this.dashboard.getSeo(workspaceId);
   }
+
+  @Get('forecast')
+  getForecast(@Workspace() workspaceId: string) {
+    return this.dashboard.getForecast(workspaceId);
+  }
 }
