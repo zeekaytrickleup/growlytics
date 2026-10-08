@@ -12,7 +12,6 @@ export interface AIAnswer {
   actions: string[];
   impact: string;
   source?: 'llm' | 'mock';
-  debug?: string; // populated only when an AI call failed and we fell back to mock
 }
 
 // JSON Schema for structured outputs — guarantees the model returns exactly this shape.
@@ -69,10 +68,7 @@ export class AiService {
       if (this.client) return await this.callAnthropic(question, context);
       if (this.geminiKey) return await this.callGemini(question, context);
     } catch (err) {
-      const msg = (err as Error).message;
-      this.logger.warn(`AI call failed, falling back to mock: ${msg}`);
-      const provider = this.client ? 'anthropic' : 'gemini';
-      return { ...this.mock(question), debug: `[${provider}] ${msg.slice(0, 400)}` };
+      this.logger.warn(`AI call failed, falling back to mock: ${(err as Error).message}`);
     }
     return this.mock(question);
   }
