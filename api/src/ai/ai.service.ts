@@ -93,7 +93,14 @@ export class AiService {
     return { ...(JSON.parse(text) as AIAnswer), source: 'llm' };
   }
 
-  // Free tier — Google Gemini (gemini-2.0-flash) with a JSON response schema.
+  // Candidate Gemini models, tried in order. Lite/latest variants are far more available on the
+  // free tier when the flagship is returning 503 "high demand". GEMINI_MODEL overrides the list.
+  private geminiModels(): string[] {
+    if (process.env.GEMINI_MODEL) return [process.env.GEMINI_MODEL];
+    return ['gemini-3.8-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
+  }
+
+  // Free tier — Google Gemini with a JSON response schema.
   private async callGemini(question: string, context: unknown): Promise<AIAnswer> {
     const schema = {
       type: 'OBJECT',
@@ -106,31 +113,33 @@ export class AiService {
       },
       required: ['analysis', 'reason', 'confidence', 'actions', 'impact'],
     };
-    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiKey}`;
     const body = JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents: [{ parts: [{ text: this.userPrompt(question, context) }] }],
       generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 },
     });
 
-    // Retry on transient overload/rate-limit (503/429) with short backoff before giving up.
-    let res: Response | null = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      if (res.ok) break;
-      if (res.status === 503 || res.status === 429) {
-        if (attempt < 3) {
-          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
-          continue;
+    const models = this.geminiModels();
+    let lastErr = 'Gemini unavailable.';
+    // Try each model; retry a couple times on transient 503/429 before moving to the next.
+    for (const model of models) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiKey}`;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        if (res.ok) {
+          const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          return { ...(JSON.parse(text) as AIAnswer), source: 'llm' };
         }
+        lastErr = `Gemini ${model} ${res.status}: ${(await res.text()).slice(0, 120)}`;
+        if ((res.status === 503 || res.status === 429) && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 500));
+          continue; // one quick retry, then fall through to the next model
+        }
+        break; // non-transient (e.g. 404 bad model) → try the next model
       }
-      throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 160)}`);
     }
-    if (!res || !res.ok) throw new Error('Gemini unavailable after retries.');
-    const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    return { ...(JSON.parse(text) as AIAnswer), source: 'llm' };
+    throw new Error(lastErr);
   }
 
   // Grounded canned answers (mirror the prototype) + a generic fallback for free-text questions.
