@@ -108,16 +108,26 @@ export class AiService {
     };
     const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.geminiKey}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ parts: [{ text: this.userPrompt(question, context) }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 },
-      }),
+    const body = JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ parts: [{ text: this.userPrompt(question, context) }] }],
+      generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 },
     });
-    if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 160)}`);
+
+    // Retry on transient overload/rate-limit (503/429) with short backoff before giving up.
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      if (res.ok) break;
+      if (res.status === 503 || res.status === 429) {
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+          continue;
+        }
+      }
+      throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    }
+    if (!res || !res.ok) throw new Error('Gemini unavailable after retries.');
     const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     return { ...(JSON.parse(text) as AIAnswer), source: 'llm' };
