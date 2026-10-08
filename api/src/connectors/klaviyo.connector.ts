@@ -46,7 +46,9 @@ export class KlaviyoConnector implements MarketingConnector {
 
   /** Sum a metric's value + count over the last 30 days via the Metric Aggregates API. */
   private async aggregate(apiKey: string, metricId: string): Promise<{ sum: number; count: number }> {
-    const since = new Date(Date.now() - 30 * DAY).toISOString();
+    const now = Date.now();
+    const since = new Date(now - 30 * DAY).toISOString();
+    const until = new Date(now).toISOString();
     const res = await fetch(`${KLAVIYO_BASE}/metric-aggregates/`, {
       method: 'POST',
       headers: this.headers(apiKey),
@@ -56,10 +58,11 @@ export class KlaviyoConnector implements MarketingConnector {
           attributes: {
             metric_id: metricId,
             measurements: ['sum_value', 'count'],
-            interval: 'month',
+            interval: 'day',
             page_size: 500,
             timezone: 'UTC',
-            filter: `greater-or-equal(datetime,${since})`,
+            // Klaviyo requires BOTH a lower and upper datetime bound on the filter.
+            filter: `and(greater-or-equal(datetime,${since}),less-than(datetime,${until}))`,
           },
         },
       }),
