@@ -437,21 +437,31 @@ export class DashboardService {
       const ord = linreg(activeOrd);
       const n = activeRev.length;
 
-      // Project the next 13 weeks (~90 days).
+      // Project the next 13 weeks (~90 days) with a DAMPED trend (Holt-style): the slope's
+      // contribution decays each week (phi<1), so a short/steep trend flattens instead of
+      // ballooning when extrapolated well beyond the observed history.
       const PROJ = 13;
+      const phi = 0.8;
+      const levelRev = rev.intercept + rev.slope * (n - 1); // last fitted level
+      const levelOrd = ord.intercept + ord.slope * (n - 1);
       const projRev: number[] = [];
       const projOrd: number[] = [];
+      let dampSum = 0;
       for (let i = 1; i <= PROJ; i++) {
-        projRev.push(Math.max(0, rev.intercept + rev.slope * (n - 1 + i)));
-        projOrd.push(Math.max(0, ord.intercept + ord.slope * (n - 1 + i)));
+        dampSum += Math.pow(phi, i);
+        projRev.push(Math.max(0, levelRev + rev.slope * dampSum));
+        projOrd.push(Math.max(0, levelOrd + ord.slope * dampSum));
       }
       const next90Rev = projRev.reduce((a, b) => a + b, 0);
       const next90Ord = projOrd.reduce((a, b) => a + b, 0);
       const meanWeekly = activeRev.reduce((a, b) => a + b, 0) / n;
-      const recent90 = activeRev.slice(-PROJ).reduce((a, b) => a + b, 0);
-      const recent90Ord = activeOrd.slice(-PROJ).reduce((a, b) => a + b, 0);
-      const growth = recent90 ? Math.round(((next90Rev - recent90) / recent90) * 100) : 0;
-      const growthOrd = recent90Ord ? Math.round(((next90Ord - recent90Ord) / recent90Ord) * 100) : 0;
+      // Fair comparison: projected weekly average vs the recent weekly average (not 13 wks vs 7).
+      const recentWk = activeRev.slice(-Math.min(6, n));
+      const recentWkAvg = recentWk.reduce((a, b) => a + b, 0) / recentWk.length;
+      const recentOrdWk = activeOrd.slice(-Math.min(6, n));
+      const recentOrdAvg = recentOrdWk.reduce((a, b) => a + b, 0) / recentOrdWk.length;
+      const growth = recentWkAvg ? Math.round(((next90Rev / PROJ - recentWkAvg) / recentWkAvg) * 100) : 0;
+      const growthOrd = recentOrdAvg ? Math.round(((next90Ord / PROJ - recentOrdAvg) / recentOrdAvg) * 100) : 0;
       // Volatility → a rough confidence band.
       const variance = activeRev.reduce((a, b) => a + (b - meanWeekly) ** 2, 0) / n;
       const cv = meanWeekly ? Math.sqrt(variance) / meanWeekly : 0;
@@ -462,7 +472,7 @@ export class DashboardService {
       const kpis = [
         { key: 'rev90', label: 'Revenue (next 90d)', value: money(next90Rev), delta: `${Math.abs(growth)}%`, kind: growth >= 0 ? 'up' : 'down' },
         { key: 'ord90', label: 'Orders (next 90d)', value: Math.round(next90Ord).toLocaleString('en-US'), delta: `${Math.abs(growthOrd)}%`, kind: growthOrd >= 0 ? 'up' : 'down' },
-        { key: 'avgwk', label: 'Avg / week', value: money(meanWeekly), delta: `${growth >= 0 ? '+' : '-'}trend`, kind: rev.slope >= 0 ? 'up' : 'down' },
+        { key: 'avgwk', label: 'Avg / week', value: money(meanWeekly), delta: `${Math.abs(growth)}%`, kind: rev.slope >= 0 ? 'up' : 'down' },
         { key: 'conf', label: 'Confidence', value: `${confidence}%`, delta: `±${band}%`, kind: 'up' },
       ];
 
@@ -475,9 +485,10 @@ export class DashboardService {
       const aiNote =
         `Based on ${n} weeks of your sales history, revenue is trending ${rev.slope >= 0 ? 'upward' : 'downward'}. ` +
         `The model projects about ${money(next90Rev)} over the next 90 days (±${band}%, ${confidence}% confidence)` +
-        (growth ? `, a ${Math.abs(growth)}% ${growth >= 0 ? 'increase' : 'decrease'} vs. the last 90 days` : '') + '. ' +
+        (growth ? `, roughly ${Math.abs(growth)}% ${growth >= 0 ? 'above' : 'below'} your recent weekly run-rate` : '') + '. ' +
+        (n < 8 ? 'Confidence is limited by the short sales history — it will sharpen as more weeks accumulate. ' : '') +
         (trailingZeros > 0
-          ? `Note: the most recent ${trailingZeros} week(s) show $0 (your current stockout) and were excluded — this forecast assumes you restock your top sellers. `
+          ? `The most recent ${trailingZeros} week(s) show $0 (your current stockout) and were excluded, so this assumes you restock your top sellers. `
           : '') +
         'Pre-commit inventory for your best sellers ahead of demand to protect the forecast.';
 
