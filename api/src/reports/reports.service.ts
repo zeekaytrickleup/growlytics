@@ -296,6 +296,8 @@ export class ReportsService {
       const range = doc.bufferedPageRange();
       for (let i = 0; i < range.count; i++) {
         doc.switchToPage(range.start + i);
+        // Zero the bottom margin so drawing in the footer zone doesn't trigger a new page.
+        doc.page.margins.bottom = 0;
         const y = PAGE_H - 42;
         doc.moveTo(M, y).lineTo(M + CW, y).lineWidth(0.5).strokeColor(LINE).stroke();
         doc.fillColor(DIM).font('Helvetica').fontSize(7.5)
