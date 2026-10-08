@@ -26,29 +26,53 @@ export class AssistantService {
     return { suggestions: SUGGESTED_QUESTIONS, aiEnabled: this.ai.enabled };
   }
 
-  /** Build a compact snapshot of the workspace's connected data for grounding the LLM. */
+  /** Build a compact snapshot of ALL the workspace's connected data for grounding the LLM. */
   private async buildContext(workspaceId: string) {
-    const overview = await this.dashboard.getOverview(workspaceId);
-    let segments: { name: string; ltv: number | null }[] = [];
-    let store = 'Northwind Goods';
+    // Pull every connected area in parallel; each falls back independently so one failure
+    // never blanks the whole snapshot.
+    const [overview, productsRes, seo, marketing] = await Promise.all([
+      this.dashboard.getOverview(workspaceId).catch(() => null),
+      this.dashboard.getProducts(workspaceId).catch(() => null),
+      this.dashboard.getSeo(workspaceId).catch(() => null),
+      this.dashboard.getMarketing(workspaceId).catch(() => null),
+    ]);
+
+    let segments: { name: string; n: number }[] = [];
+    let store = 'your store';
     try {
       const [segs, ws] = await Promise.all([
         this.prisma.segment.findMany({ where: { workspaceId } }),
         this.prisma.workspace.findUnique({ where: { id: workspaceId } }),
       ]);
-      segments = segs.map((s) => ({ name: s.name, ltv: null }));
+      segments = segs.map((s) => ({ name: s.name, n: 0 }));
       if (ws) store = ws.name;
     } catch {
-      // no DB — overview mock is still enough context
+      // no DB — the data above is still enough context
     }
+
+    // Keep it compact: cap list sizes so the prompt stays small but representative.
     return {
       store,
       period: 'last 90 days',
-      kpis: overview.kpis,
-      revenueSeries: overview.revenueSeries,
-      trafficSources: overview.trafficSources,
-      topProducts: overview.topProducts,
+      dataSources: {
+        store: overview?.source ?? 'none',
+        seo: seo?.source ?? 'none',
+        marketing: marketing?.source ?? 'none',
+      },
+      kpis: overview?.kpis ?? [],
+      revenueSeries: overview?.revenueSeries ?? [],
+      trafficSources: overview?.trafficSources ?? [],
+      // Full product list (name, revenue, orders, conversion, stock) for product/inventory questions.
+      products: (productsRes?.products ?? overview?.topProducts ?? []).slice(0, 15),
       customerSegments: segments,
+      // Real SEO (Search Console) — headline metrics + top keywords.
+      seo: seo
+        ? { source: seo.source, kpis: seo.kpis, topKeywords: (seo.keywords ?? []).slice(0, 10) }
+        : null,
+      // Marketing channels (email/ads) — spend, revenue, ROAS.
+      marketing: marketing
+        ? { source: marketing.source, kpis: marketing.kpis, channels: marketing.channels }
+        : null,
     };
   }
 
