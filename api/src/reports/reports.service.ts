@@ -197,7 +197,7 @@ export class ReportsService {
           doc.fillColor(DIM).font('Helvetica').fontSize(7.5).text(k.label.toUpperCase(), x + 11, y + 10, { width: cardW - 22, characterSpacing: 0.3 });
           doc.fillColor(INK).font('Helvetica-Bold').fontSize(16).text(k.value, x + 11, y + 21, { width: cardW - 22, ellipsis: true });
           doc.fillColor(k.kind === 'up' ? GREEN : RED).font('Helvetica').fontSize(8.5)
-            .text(`${k.kind === 'up' ? '▲' : '▼'} ${k.delta}`, x + 11, y + 41);
+            .text(`${k.kind === 'up' ? '+' : '-'}${k.delta}`, x + 11, y + 41);
         });
         doc.y = startY + rows * (cardH + gap) + 2;
         doc.fillColor(INK);
@@ -299,8 +299,8 @@ export class ReportsService {
         const y = PAGE_H - 42;
         doc.moveTo(M, y).lineTo(M + CW, y).lineWidth(0.5).strokeColor(LINE).stroke();
         doc.fillColor(DIM).font('Helvetica').fontSize(7.5)
-          .text('Growlytics AI — Your AI Co-Pilot for Smarter E-commerce Growth', M, y + 7, { width: CW, align: 'left' });
-        doc.text(`Page ${i + 1} of ${range.count}`, M, y + 7, { width: CW, align: 'right' });
+          .text('Growlytics AI — Your AI Co-Pilot for Smarter E-commerce Growth', M, y + 7, { width: CW, align: 'left', lineBreak: false });
+        doc.text(`Page ${i + 1} of ${range.count}`, M, y + 7, { width: CW, align: 'right', lineBreak: false });
       }
 
       doc.end();
