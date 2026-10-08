@@ -17,7 +17,7 @@ import {
 import {
   fetchOverview, fetchProducts, fetchCustomerSegments, askAssistant, fetchIntegrations, connectIntegration, syncIntegration,
   fetchReportSummary, reportPdfUrl, fetchMe, setWorkspace, getWorkspace, createWorkspace, fetchMarketing, fetchSeo,
-  type Overview, type Integration, type ReportSummary, type Me, type WooCreds, type Marketing, type Seo,
+  type Overview, type Integration, type ReportResult, type ReportOpts, type Me, type WooCreds, type Marketing, type Seo,
 } from "../lib/api";
 
 /* ============================================================
@@ -199,6 +199,11 @@ const STYLES = `
 .field textarea:focus { border-color: rgba(124,124,240,0.5); }
 .field .hint { font-size: 10.5px; color: var(--mute); margin-top: 4px; }
 .form-err { font-size: 12px; color: var(--red); background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.25); padding: 8px 11px; border-radius: 9px; }
+
+/* report builder */
+.report-check { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; cursor: pointer; transition: all .14s; }
+.report-check input { margin-top: 2px; accent-color: var(--primary); width: 15px; height: 15px; cursor: pointer; }
+.report-h { font-size: 13px; font-weight: 700; color: var(--text); padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
 
 .chip { font-size: 12px; padding: 7px 13px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--dim); cursor: pointer; transition: all .16s; }
 .chip:hover { color: var(--text); }
@@ -1394,79 +1399,155 @@ function Integrations() {
 }
 
 /* ---------------- Reports ---------------- */
+const REPORT_SECTIONS: { key: string; label: string; sub: string }[] = [
+  { key: "revenue", label: "Revenue & Overview", sub: "KPIs, summary & AI insights" },
+  { key: "products", label: "Products", sub: "Top products, orders, stock" },
+  { key: "seo", label: "SEO", sub: "Search Console keywords" },
+  { key: "marketing", label: "Marketing", sub: "Ad & email channels" },
+];
+
+function ReportKpis({ kpis }: { kpis: { label: string; value: string; delta: string; kind: string }[] }) {
+  return (
+    <div className="kpi-grid" style={{ marginBottom: 14 }}>
+      {kpis.map((k, i) => (
+        <div key={i} className="kpi">
+          <div className="kpi-label">{k.label}</div>
+          <div className="kpi-value mono" style={{ fontSize: 22 }}>{k.value}</div>
+          <Badge kind={k.kind}>{k.kind === "up" ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}{k.delta}</Badge>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Reports() {
-  const [report, setReport] = useState<ReportSummary | null>(null);
+  const [report, setReport] = useState<ReportResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sel, setSel] = useState<Record<string, boolean>>({ revenue: true, products: true, seo: true, marketing: true });
+  const [period, setPeriod] = useState("30d");
+  const [range, setRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [showCustom, setShowCustom] = useState(false);
+  const customActive = !!(range.from && range.to);
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const chosen = REPORT_SECTIONS.filter(s => sel[s.key]).map(s => s.key);
+  const opts = (): ReportOpts => ({ sections: chosen, ...(customActive ? { from: range.from, to: range.to } : { period }) });
 
   const generate = async () => {
+    if (!chosen.length) return;
     setLoading(true);
-    const r = await fetchReportSummary();
-    setReport(
-      r ?? {
-        store: "Northwind Goods", period: "Last 30 days", generatedAt: new Date().toISOString(),
-        headlineKpis: [
-          { label: "Revenue", value: "$81.2k", delta: "18%", kind: "up" },
-          { label: "Profit", value: "$29.4k", delta: "14%", kind: "up" },
-          { label: "ROAS", value: "3.8x", delta: "12%", kind: "down" },
-        ],
-        narrative: "Revenue reached $81.2k (+18%) driven by strong weekend paid and email performance. Blended ROAS held at 4.6x despite a Meta dip. Aurora Buds emerged as the breakout product; Flux Bottle inventory needs attention.",
-        insights: [], source: "demo",
-      }
-    );
+    const r = await fetchReportSummary(opts());
+    if (r) setReport(r);
     setLoading(false);
   };
 
+  const toggle = (k: string) => setSel(s => ({ ...s, [k]: !s[k] }));
+  const pickPreset = (p: string) => { setRange({ from: "", to: "" }); setPeriod(p); };
+
   return (
     <div className="content fade-up">
+      {/* Builder */}
       <div className="card pad-lg">
-        {!report ? (
-          <div className="state-box">
-            <div className="state-ico"><FileText size={26} style={{ color: "var(--dim)" }} /></div>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>No reports yet</div>
-            <div style={{ fontSize: 13, color: "var(--dim)", maxWidth: 360 }}>Generate an executive summary of your store's performance as a PDF — written from your connected store data.</div>
-            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-              <button className="btn primary" onClick={generate} disabled={loading}>
-                {loading ? <RefreshCw size={14} style={{ animation: "spin 1.4s linear infinite" }} /> : <Sparkles size={14} />} {loading ? "Generating…" : "Generate report"}
-              </button>
+        <div className="card-head"><div><div className="card-title">Build a report</div><div className="card-sub">Pick what to include and the date range — for the current store</div></div></div>
+
+        <div style={{ fontSize: 11.5, color: "var(--dim)", fontWeight: 600, margin: "4px 0 8px" }}>Sections</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 10 }}>
+          {REPORT_SECTIONS.map(s => (
+            <label key={s.key} className="report-check" style={{ borderColor: sel[s.key] ? "rgba(124,124,240,0.5)" : "var(--border)", background: sel[s.key] ? "rgba(91,91,214,0.08)" : "var(--surface-2)" }}>
+              <input type="checkbox" checked={!!sel[s.key]} onChange={() => toggle(s.key)} />
+              <div><div style={{ fontSize: 13, fontWeight: 600 }}>{s.label}</div><div style={{ fontSize: 11, color: "var(--mute)" }}>{s.sub}</div></div>
+            </label>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 11.5, color: "var(--dim)", fontWeight: 600, margin: "16px 0 8px" }}>Date range</div>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          {([["This week", "7d"], ["This month", "30d"], ["Last 90 days", "90d"]] as const).map(([t, p]) => (
+            <span key={p} className={`chip ${!customActive && period === p ? "active" : ""}`} onClick={() => pickPreset(p)}>{t}</span>
+          ))}
+          <span className={`chip ${showCustom || customActive ? "active" : ""}`} onClick={() => setShowCustom(s => !s)}>
+            <Calendar size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />Custom date
+          </span>
+          {(showCustom || customActive) && (
+            <div className="fb-range">
+              <input type="date" className="fb-date" max={range.to || todayStr} value={range.from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} />
+              <span className="fb-dash">→</span>
+              <input type="date" className="fb-date" min={range.from || undefined} max={todayStr} value={range.to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} />
+              {customActive && <span className="chip" onClick={() => { setRange({ from: "", to: "" }); setShowCustom(false); }}>Clear</span>}
             </div>
-            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button className="btn primary" onClick={generate} disabled={loading || !chosen.length}>
+            {loading ? <RefreshCw size={14} style={{ animation: "spin 1.4s linear infinite" }} /> : <Sparkles size={14} />} {loading ? "Generating…" : "Generate report"}
+          </button>
+          {report && (
+            <a className="btn ghost" style={{ display: "inline-flex", alignItems: "center" }} href={reportPdfUrl(opts())} target="_blank" rel="noreferrer"><Download size={14} /> Download PDF</a>
+          )}
+        </div>
+        {!chosen.length && <div style={{ fontSize: 12, color: "var(--red)", marginTop: 8 }}>Select at least one section.</div>}
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+
+      {/* Rendered report */}
+      {report && (
+        <div className="card pad-lg">
+          <div className="card-head">
+            <div>
+              <div className="card-title">{report.store} — Report</div>
+              <div className="card-sub">{report.period} · {report.source === "live" ? "live data" : "demo data"} · {new Date(report.generatedAt).toLocaleString()}</div>
+            </div>
+            <a className="btn primary" style={{ padding: "6px 12px", fontSize: 12 }} href={reportPdfUrl(opts())} target="_blank" rel="noreferrer"><Download size={13} /> PDF</a>
           </div>
-        ) : (
-          <>
-            <div className="card-head">
-              <div>
-                <div className="card-title">Executive Summary — {report.period}</div>
-                <div className="card-sub">Auto-generated · {report.source === "live" ? "live data" : "demo data"} · {new Date(report.generatedAt).toLocaleString()}</div>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <a className="btn primary" style={{ padding: "6px 12px", fontSize: 12 }} href={reportPdfUrl()} target="_blank" rel="noreferrer"><Download size={13} /> PDF</a>
-                <button className="btn ghost" style={{ padding: "6px 12px", fontSize: 12 }} onClick={generate}><RefreshCw size={13} /> Refresh</button>
-              </div>
-            </div>
-            <div className="kpi-grid" style={{ marginBottom: 16 }}>
-              {report.headlineKpis.map((k, i) => (
-                <div key={i} className="kpi">
-                  <div className="kpi-label">{k.label}</div>
-                  <div className="kpi-value mono" style={{ fontSize: 22 }}>{k.value}</div>
-                  <Badge kind={k.kind}>{k.kind === "up" ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}{k.delta}</Badge>
+
+          {report.revenue && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="report-h">Revenue & Overview</div>
+              <ReportKpis kpis={report.revenue.kpis} />
+              <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--dim)" }}>{report.revenue.narrative}</p>
+              {report.revenue.insights.length > 0 && report.revenue.insights.map((ins, i) => (
+                <div key={i} className="action-row">
+                  <span style={{ fontSize: 13, flex: 1 }}><b>{ins.title}</b> — {ins.body}</span>
+                  {ins.confidence > 0 && <span className="badge pri">{ins.confidence}%</span>}
                 </div>
               ))}
             </div>
-            <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--dim)" }}>{report.narrative}</p>
-            {report.insights.length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <div className="ai-block-label" style={{ color: "var(--primary-2)" }}><Sparkles size={13} /> AI recommendations</div>
-                {report.insights.map((ins, i) => (
-                  <div key={i} className="action-row">
-                    <span style={{ fontSize: 13, flex: 1 }}><b>{ins.title}</b> — {ins.body}</span>
-                    {ins.confidence > 0 && <span className="badge pri">{ins.confidence}%</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          )}
+
+          {report.products && (
+            <div style={{ marginTop: 18 }}>
+              <div className="report-h">Top Products</div>
+              <table className="tbl"><thead><tr><th>Product</th><th>Revenue</th><th>Orders</th><th>CR</th><th>Stock</th></tr></thead>
+                <tbody>{report.products.items.map((p, i) => (
+                  <tr key={i}><td className="name">{p.name}</td><td className="mono">{p.rev}</td><td className="mono">{p.orders}</td><td className="mono">{p.cr}%</td><td className="mono">{p.stock < 0 ? "In stock" : p.stock}</td></tr>
+                ))}</tbody></table>
+            </div>
+          )}
+
+          {report.seo && (
+            <div style={{ marginTop: 18 }}>
+              <div className="report-h">SEO — Search Console {report.seo.source !== "live" && <span className="badge neutral" style={{ marginLeft: 6 }}>sample</span>}</div>
+              <ReportKpis kpis={report.seo.kpis} />
+              <table className="tbl"><thead><tr><th>Keyword</th><th>Clicks</th><th>CTR</th><th>Position</th></tr></thead>
+                <tbody>{report.seo.keywords.map((k, i) => (
+                  <tr key={i}><td className="name">{k.query}</td><td className="mono">{k.clicks.toLocaleString()}</td><td className="mono">{k.ctr}%</td><td className="mono">{k.position}</td></tr>
+                ))}</tbody></table>
+            </div>
+          )}
+
+          {report.marketing && (
+            <div style={{ marginTop: 18 }}>
+              <div className="report-h">Marketing — Channels {report.marketing.source !== "live" && <span className="badge neutral" style={{ marginLeft: 6 }}>sample</span>}</div>
+              <ReportKpis kpis={report.marketing.kpis} />
+              <table className="tbl"><thead><tr><th>Channel</th><th>Spend</th><th>Revenue</th><th>ROAS</th><th>Conv.</th></tr></thead>
+                <tbody>{report.marketing.channels.map((c, i) => (
+                  <tr key={i}><td className="name">{c.name}</td><td className="mono">{c.spend}</td><td className="mono" style={{ color: "var(--emerald)" }}>{c.rev}</td><td className="mono">{c.roas}</td><td className="mono">{c.conv}</td></tr>
+                ))}</tbody></table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

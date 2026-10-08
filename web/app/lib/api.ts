@@ -65,18 +65,39 @@ export type AIAnswer = {
   source?: "llm" | "mock";
 };
 
-export type ReportSummary = {
+export type ReportKpi = { label: string; value: string; delta: string; kind: string };
+export type ReportResult = {
   store: string;
   period: string;
   generatedAt: string;
-  headlineKpis: { label: string; value: string; delta: string; kind: string }[];
-  narrative: string;
-  insights: { title: string; body: string; confidence: number }[];
   source: string;
+  sections: string[];
+  revenue?: { kpis: ReportKpi[]; narrative: string; insights: { title: string; body: string; confidence: number }[] };
+  products?: { items: { name: string; rev: string; orders: number; cr: number; stock: number }[] };
+  seo?: { source: string; kpis: ReportKpi[]; keywords: { query: string; clicks: number; ctr: number; position: number }[] };
+  marketing?: { source: string; kpis: ReportKpi[]; channels: { name: string; spend: string; rev: string; roas: string; conv: number }[] };
 };
 
-export const fetchReportSummary = () => getJson<ReportSummary>("/reports/summary");
-export const reportPdfUrl = () => `${API_URL}/reports/summary.pdf?workspaceId=${encodeURIComponent(currentWorkspaceId)}`;
+export type ReportOpts = { sections?: string[]; period?: string; from?: string; to?: string };
+
+// Build the shared query string (sections + date filter) for report endpoints.
+function reportQuery(opts?: ReportOpts): string {
+  const p = new URLSearchParams();
+  if (opts?.sections?.length) p.set("sections", opts.sections.join(","));
+  if (opts?.from && opts?.to) { p.set("from", opts.from); p.set("to", opts.to); }
+  else if (opts?.period) p.set("period", opts.period);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+export const fetchReportSummary = (opts?: ReportOpts) =>
+  getJson<ReportResult>(`/reports/summary${reportQuery(opts)}`);
+
+export const reportPdfUrl = (opts?: ReportOpts) => {
+  const p = new URLSearchParams(reportQuery(opts).replace(/^\?/, ""));
+  p.set("workspaceId", currentWorkspaceId);
+  return `${API_URL}/reports/summary.pdf?${p.toString()}`;
+};
 
 export type Integration = {
   provider: string;
