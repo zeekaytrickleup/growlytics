@@ -10,7 +10,7 @@ const KPI_CONFIG: { key: string; label: string; fmt: (v: number) => string }[] =
   { key: 'orders', label: 'Orders', fmt: (v) => Math.round(v).toLocaleString('en-US') },
   { key: 'profit', label: 'Profit', fmt: (v) => `$${(v / 1000).toFixed(1)}k` },
   { key: 'roas', label: 'ROAS', fmt: (v) => `${v}x` },
-  { key: 'aov', label: 'Avg Order Value', fmt: (v) => `$${v}` },
+  { key: 'aov', label: 'Avg Order Value', fmt: (v) => `$${v.toFixed(2)}` },
   { key: 'cr', label: 'Conversion Rate', fmt: (v) => `${v}%` },
   { key: 'ltv', label: 'Customer LTV', fmt: (v) => `$${v}` },
   { key: 'returning', label: 'Returning', fmt: (v) => `${v}%` },

@@ -959,12 +959,13 @@ function Marketing() {
 
 /* ---------------- generic metric screens ---------------- */
 type KpiDef = { icon: React.ElementType; label: string; value: string; delta: string; kind: string; color: string };
-function MetricScreen({ title, sub, kpis, tableHead, rows, chart, aiNote, live }: {
+function MetricScreen({ title, sub, kpis, tableHead, rows, chart, aiNote, live, header }: {
   title: string; sub?: string; kpis?: KpiDef[]; tableHead?: string[];
-  rows?: React.ReactNode[][]; chart?: { k: string; v: number }[]; aiNote?: string; live?: boolean;
+  rows?: React.ReactNode[][]; chart?: { k: string; v: number }[]; aiNote?: string; live?: boolean; header?: React.ReactNode;
 }) {
   return (
     <div className="content fade-up">
+      {header}
       {live !== undefined && (
         <div className="section-label" style={{ marginBottom: -4 }}>
           <SearchIcon size={15} className="accent" /> {title}
@@ -1587,7 +1588,19 @@ function SettingsPage() {
 /* ---------------- Revenue (live) ---------------- */
 function Revenue() {
   const [o, setO] = useState<Overview | null>(null);
-  useEffect(() => { fetchOverview().then(setO); }, []);
+  const [period, setPeriod] = useState("30d");
+  const [range, setRange] = useState<{ from: string; to: string }>({ from: "", to: "" });
+  const [showCustom, setShowCustom] = useState(false);
+  const customActive = !!(range.from && range.to);
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    let mounted = true;
+    const q = customActive ? { from: range.from, to: range.to } : period;
+    fetchOverview(q).then(d => { if (mounted && d) setO(d); });
+    return () => { mounted = false; };
+  }, [period, range.from, range.to, customActive]);
+
   const keys = ["revenue", "profit", "aov", "orders"];
   const kpis = (o?.kpis ?? []).filter(k => keys.includes(k.key)).map(k => {
     const p = KPI_PRESENTATION[k.key] ?? { icon: DollarSign, label: k.label, color: "var(--primary-2)" };
@@ -1595,7 +1608,33 @@ function Revenue() {
   });
   const chart = (o?.revenueSeries ?? revenueData).map(r => ({ k: r.d, v: r.rev }));
   const aiNote = o?.insights?.[0]?.body ?? "Daily revenue trend from your connected store.";
-  return <MetricScreen title="Revenue" sub="Daily revenue from your connected store" kpis={kpis.length ? kpis : undefined} chart={chart} aiNote={aiNote} />;
+  const label = customActive ? `${range.from} → ${range.to}` : period === "7d" ? "Last 7 days" : period === "30d" ? "Last 30 days" : "Last 90 days";
+  const pickPreset = (p: string) => { setRange({ from: "", to: "" }); setPeriod(p); };
+
+  const filterBar = (
+    <div className="filterbar">
+      <div className="fb-label"><SlidersHorizontal size={15} className="accent" /> Showing</div>
+      <div className="fb-seg">
+        {([["This week", "7d"], ["This month", "30d"], ["Last 90 days", "90d"]] as const).map(([t, p]) => (
+          <span key={p} className={`chip ${!customActive && period === p ? "active" : ""}`} onClick={() => pickPreset(p)}>{t}</span>
+        ))}
+      </div>
+      <div className="fb-spacer" />
+      <span className={`chip ${showCustom || customActive ? "active" : ""}`} onClick={() => setShowCustom(s => !s)}>
+        <Calendar size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />Custom date
+      </span>
+      {(showCustom || customActive) && (
+        <div className="fb-range">
+          <input type="date" className="fb-date" max={range.to || todayStr} value={range.from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} />
+          <span className="fb-dash">→</span>
+          <input type="date" className="fb-date" min={range.from || undefined} max={todayStr} value={range.to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} />
+          {customActive && <span className="chip" onClick={() => { setRange({ from: "", to: "" }); setShowCustom(false); }}>Clear</span>}
+        </div>
+      )}
+    </div>
+  );
+
+  return <MetricScreen title="Revenue" sub={`Daily revenue · ${label}`} header={filterBar} kpis={kpis.length ? kpis : undefined} chart={chart} aiNote={aiNote} />;
 }
 
 /* ---------------- Inventory (live) ---------------- */
